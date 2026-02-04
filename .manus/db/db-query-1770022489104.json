@@ -1,0 +1,76 @@
+{
+  "query": "SELECT id, cardId, photoIndex, voteCount FROM photos ORDER BY cardId, photoIndex;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3M4eDv4Ntjrdo71.32cc59e7e923 --database gumpHSqNJm89Zzo2oU2pqY --execute SELECT id, cardId, photoIndex, voteCount FROM photos ORDER BY cardId, photoIndex;",
+  "rows": [
+    {
+      "id": "1",
+      "cardId": "1",
+      "photoIndex": "0",
+      "voteCount": "0"
+    },
+    {
+      "id": "3",
+      "cardId": "1",
+      "photoIndex": "0",
+      "voteCount": "8"
+    },
+    {
+      "id": "2",
+      "cardId": "1",
+      "photoIndex": "1",
+      "voteCount": "0"
+    },
+    {
+      "id": "4",
+      "cardId": "1",
+      "photoIndex": "1",
+      "voteCount": "5"
+    },
+    {
+      "id": "5",
+      "cardId": "1",
+      "photoIndex": "2",
+      "voteCount": "2"
+    },
+    {
+      "id": "6",
+      "cardId": "2",
+      "photoIndex": "0",
+      "voteCount": "5"
+    },
+    {
+      "id": "7",
+      "cardId": "2",
+      "photoIndex": "1",
+      "voteCount": "12"
+    },
+    {
+      "id": "8",
+      "cardId": "2",
+      "photoIndex": "2",
+      "voteCount": "8"
+    },
+    {
+      "id": "9",
+      "cardId": "2",
+      "photoIndex": "3",
+      "voteCount": "5"
+    },
+    {
+      "id": "10",
+      "cardId": "3",
+      "photoIndex": "0",
+      "voteCount": "3"
+    },
+    {
+      "id": "11",
+      "cardId": "3",
+      "photoIndex": "1",
+      "voteCount": "5"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tcardId\tphotoIndex\tvoteCount\n1\t1\t0\t0\n3\t1\t0\t8\n2\t1\t1\t0\n4\t1\t1\t5\n5\t1\t2\t2\n6\t2\t0\t5\n7\t2\t1\t12\n8\t2\t2\t8\n9\t2\t3\t5\n10\t3\t0\t3\n11\t3\t1\t5\n",
+  "stderr": "",
+  "execution_time_ms": 52
+}

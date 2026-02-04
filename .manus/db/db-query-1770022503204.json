@@ -1,0 +1,42 @@
+{
+  "query": "\n-- 查看卡片统计\nSELECT c.id, c.deviceId, c.totalVotes, c.isCompleted, \n       COUNT(p.id) as photoCount,\n       (SELECT COUNT(*) FROM votes v WHERE v.cardId = c.id) as actualVotes\nFROM cards c\nLEFT JOIN photos p ON p.cardId = c.id\nGROUP BY c.id, c.deviceId, c.totalVotes, c.isCompleted\nORDER BY c.id;\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3M4eDv4Ntjrdo71.32cc59e7e923 --database gumpHSqNJm89Zzo2oU2pqY --execute \n-- 查看卡片统计\nSELECT c.id, c.deviceId, c.totalVotes, c.isCompleted, \n       COUNT(p.id) as photoCount,\n       (SELECT COUNT(*) FROM votes v WHERE v.cardId = c.id) as actualVotes\nFROM cards c\nLEFT JOIN photos p ON p.cardId = c.id\nGROUP BY c.id, c.deviceId, c.totalVotes, c.isCompleted\nORDER BY c.id;\n",
+  "rows": [
+    {
+      "id": "1",
+      "deviceId": "device_ml4x2dz1_e8di5doi",
+      "totalVotes": "0",
+      "isCompleted": "0",
+      "photoCount": "5",
+      "actualVotes": "15"
+    },
+    {
+      "id": "2",
+      "deviceId": "test-uploader-001",
+      "totalVotes": "15",
+      "isCompleted": "0",
+      "photoCount": "4",
+      "actualVotes": "0"
+    },
+    {
+      "id": "3",
+      "deviceId": "test-uploader-002",
+      "totalVotes": "30",
+      "isCompleted": "1",
+      "photoCount": "2",
+      "actualVotes": "8"
+    },
+    {
+      "id": "4",
+      "deviceId": "test-uploader-003",
+      "totalVotes": "8",
+      "isCompleted": "0",
+      "photoCount": "0",
+      "actualVotes": "0"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tdeviceId\ttotalVotes\tisCompleted\tphotoCount\tactualVotes\n1\tdevice_ml4x2dz1_e8di5doi\t0\t0\t5\t15\n2\ttest-uploader-001\t15\t0\t4\t0\n3\ttest-uploader-002\t30\t1\t2\t8\n4\ttest-uploader-003\t8\t0\t0\t0\n",
+  "stderr": "",
+  "execution_time_ms": 63
+}

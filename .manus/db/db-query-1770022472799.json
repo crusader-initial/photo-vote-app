@@ -1,0 +1,9 @@
+{
+  "query": "\n-- 插入测试卡片1：进行中，15票\nINSERT INTO cards (deviceId, predictedPhotoIndex, totalVotes, isCompleted, createdAt, updatedAt) \nVALUES ('test-uploader-001', 0, 15, false, NOW(), NOW());\n\n-- 插入测试卡片2：已完成，30票\nINSERT INTO cards (deviceId, predictedPhotoIndex, totalVotes, isCompleted, createdAt, updatedAt) \nVALUES ('test-uploader-002', 1, 30, true, NOW(), NOW());\n\n-- 插入测试卡片3：进行中，8票\nINSERT INTO cards (deviceId, predictedPhotoIndex, totalVotes, isCompleted, createdAt, updatedAt) \nVALUES ('test-uploader-003', 2, 8, false, NOW(), NOW());\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3M4eDv4Ntjrdo71.32cc59e7e923 --database gumpHSqNJm89Zzo2oU2pqY --execute \n-- 插入测试卡片1：进行中，15票\nINSERT INTO cards (deviceId, predictedPhotoIndex, totalVotes, isCompleted, createdAt, updatedAt) \nVALUES ('test-uploader-001', 0, 15, false, NOW(), NOW());\n\n-- 插入测试卡片2：已完成，30票\nINSERT INTO cards (deviceId, predictedPhotoIndex, totalVotes, isCompleted, createdAt, updatedAt) \nVALUES ('test-uploader-002', 1, 30, true, NOW(), NOW());\n\n-- 插入测试卡片3：进行中，8票\nINSERT INTO cards (deviceId, predictedPhotoIndex, totalVotes, isCompleted, createdAt, updatedAt) \nVALUES ('test-uploader-003', 2, 8, false, NOW(), NOW());\n",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 134
+}

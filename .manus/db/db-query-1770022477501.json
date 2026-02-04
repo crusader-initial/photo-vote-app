@@ -1,0 +1,28 @@
+{
+  "query": "SELECT id, deviceId, totalVotes, isCompleted FROM cards ORDER BY id DESC LIMIT 3;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3M4eDv4Ntjrdo71.32cc59e7e923 --database gumpHSqNJm89Zzo2oU2pqY --execute SELECT id, deviceId, totalVotes, isCompleted FROM cards ORDER BY id DESC LIMIT 3;",
+  "rows": [
+    {
+      "id": "4",
+      "deviceId": "test-uploader-003",
+      "totalVotes": "8",
+      "isCompleted": "0"
+    },
+    {
+      "id": "3",
+      "deviceId": "test-uploader-002",
+      "totalVotes": "30",
+      "isCompleted": "1"
+    },
+    {
+      "id": "2",
+      "deviceId": "test-uploader-001",
+      "totalVotes": "15",
+      "isCompleted": "0"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tdeviceId\ttotalVotes\tisCompleted\n4\ttest-uploader-003\t8\t0\n3\ttest-uploader-002\t30\t1\n2\ttest-uploader-001\t15\t0\n",
+  "stderr": "",
+  "execution_time_ms": 55
+}
