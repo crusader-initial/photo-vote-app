@@ -22,7 +22,6 @@ vi.mock("../server/db", () => ({
   incrementPhotoVoteCount: vi.fn().mockResolvedValue(undefined),
   createVote: vi.fn().mockResolvedValue(1),
   hasVotedOnCard: vi.fn().mockResolvedValue(false),
-  getDailyVoteCount: vi.fn().mockResolvedValue(5),
   getRandomAvailableCard: vi.fn().mockResolvedValue({
     id: 2,
     deviceId: "other-device",
@@ -71,28 +70,6 @@ describe("第一印象 API Logic", () => {
       
       const isPredictionCorrect = predictedPhotoIndex === winnerPhotoIndex;
       expect(isPredictionCorrect).toBe(true);
-    });
-  });
-
-  describe("Vote Limits", () => {
-    it("should enforce daily vote limit of 20", () => {
-      const dailyLimit = 20;
-      const currentCount = 19;
-      
-      const canVote = currentCount < dailyLimit;
-      expect(canVote).toBe(true);
-      
-      const atLimit = 20;
-      const canVoteAtLimit = atLimit < dailyLimit;
-      expect(canVoteAtLimit).toBe(false);
-    });
-
-    it("should calculate remaining votes correctly", () => {
-      const dailyLimit = 20;
-      const currentCount = 5;
-      
-      const remaining = Math.max(0, dailyLimit - currentCount);
-      expect(remaining).toBe(15);
     });
   });
 

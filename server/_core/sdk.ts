@@ -251,7 +251,13 @@ class SDKServer {
     const signedInAt = new Date();
     let user = await db.getUserByOpenId(sessionUserId);
 
-    // If user not in DB, sync from OAuth server automatically
+    // Phone login: user must already exist with openId "phone:xxx"
+    if (user && sessionUserId.startsWith("phone:")) {
+      await db.upsertUser({ openId: user.openId, lastSignedIn: signedInAt });
+      return user;
+    }
+
+    // If user not in DB, sync from OAuth server automatically (Manus)
     if (!user) {
       try {
         const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");

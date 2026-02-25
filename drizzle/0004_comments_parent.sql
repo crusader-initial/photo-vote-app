@@ -1,1 +1,1 @@
-ALTER TABLE `comments` ADD COLUMN `parentId` int;
+ALTER TABLE `comments` ADD COLUMN IF NOT EXISTS `parentId` int;

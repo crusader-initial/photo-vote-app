@@ -4,9 +4,9 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
-    "dev": "concurrently -k \"pnpm dev:server\" \"pnpm dev:metro\"",
+    "dev": "concurrently -k \"pnpm dev:server\" \"pnpm dev:mobile\"",
     "dev:server": "cross-env NODE_ENV=development tsx watch server/_core/index.ts",
-    "dev:metro": "cross-env EXPO_USE_METRO_WORKSPACE_ROOT=1 npx expo start --web --port 8081",
+    "dev:mobile": "cross-env EXPO_USE_METRO_WORKSPACE_ROOT=1 npx expo start",
     "dev:android": "concurrently -k \"pnpm dev:server\" \"pnpm start:android\"",
     "start:android": "cross-env EXPO_USE_METRO_WORKSPACE_ROOT=1 npx expo start --android",
     "android:build": "npx expo run:android",
@@ -17,11 +17,13 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "db:migrate": "drizzle-kit migrate",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "qr": "node scripts/generate_qr.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.996.0",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-navigation/bottom-tabs": "^7.8.12",
@@ -63,6 +65,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-css-interop": "^0.2.2",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-reanimated": "~4.1.6",
     "react-native-safe-area-context": "~5.6.2",

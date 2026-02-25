@@ -1,0 +1,14 @@
+node_modules
+.pnpm-store
+.expo
+.git
+.idea
+uploads
+android
+ios
+dist
+coverage
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+.env

@@ -16,9 +16,7 @@ export function setTempPhotos(photos: TempPhoto[]): void {
 }
 
 export function getTempPhotos(): TempPhoto[] | null {
-  const data = _tempPhotos;
-  _tempPhotos = null;
-  return data;
+  return _tempPhotos;
 }
 
 export function clearTempPhotos(): void {

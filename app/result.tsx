@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
@@ -7,6 +7,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { ActionButton } from "@/components/action-button";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useDeviceId } from "@/hooks/use-device-id";
+import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
 import { getImageUrl } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ export default function ResultScreen() {
   const cardId = params.cardId ? parseInt(params.cardId, 10) : 0;
   const fromFavorites = params.from === "favorites";
   const { deviceId } = useDeviceId();
+  const { user } = useAuth();
 
   const [commentText, setCommentText] = useState("");
   const [replyingTo, setReplyingTo] = useState<{ commentId: number; deviceId: string } | null>(null);
@@ -77,6 +79,11 @@ export default function ResultScreen() {
 
   const handleSubmitComment = () => {
     if (!commentText.trim() || !deviceId || !cardId) return;
+    if (!user) {
+      if (Platform.OS === "web") window.alert("请先登录后评论");
+      else Alert.alert("提示", "请先登录后评论", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
+      return;
+    }
     createCommentMutation.mutate({
       cardId,
       deviceId,
@@ -104,6 +111,11 @@ export default function ResultScreen() {
 
   const handleToggleFavorite = () => {
     if (!deviceId || !cardId || toggleFavoriteMutation.isPending) return;
+    if (!user) {
+      if (Platform.OS === "web") window.alert("请先登录后收藏");
+      else Alert.alert("提示", "请先登录后收藏", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
+      return;
+    }
     toggleFavoriteMutation.mutate({ cardId, deviceId });
   };
 
@@ -230,25 +242,26 @@ export default function ResultScreen() {
               <View style={styles.commentInputRow}>
                 <TextInput
                   style={styles.commentInput}
-                  placeholder={replyingTo ? "输入回复..." : "写下你的想法..."}
+                  placeholder={!user ? "请先登录后评论" : replyingTo ? "输入回复..." : "写下你的想法..."}
                   placeholderTextColor="#9CA3AF"
                   value={commentText}
                   onChangeText={setCommentText}
                   multiline
                   maxLength={500}
+                  editable={!!user}
                 />
                 <Pressable
                   onPress={handleSubmitComment}
-                  disabled={!commentText.trim() || createCommentMutation.isPending}
+                  disabled={!user || !commentText.trim() || createCommentMutation.isPending}
                   style={[
                     styles.commentSendBtn,
-                    (!commentText.trim() || createCommentMutation.isPending) && styles.commentSendBtnDisabled,
+                    (!user || !commentText.trim() || createCommentMutation.isPending) && styles.commentSendBtnDisabled,
                   ]}
                 >
                   <IconSymbol
                     name="paperplane.fill"
                     size={20}
-                    color={commentText.trim() && !createCommentMutation.isPending ? "#6366F1" : "#D1D5DB"}
+                    color={user && commentText.trim() && !createCommentMutation.isPending ? "#6366F1" : "#D1D5DB"}
                   />
                 </Pressable>
               </View>

@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ScreenContainer } from "@/components/screen-container";
-import { HistoryDrawer } from "@/components/history-drawer";
 import { useDeviceId } from "@/hooks/use-device-id";
 import { trpc } from "@/lib/trpc";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -16,19 +15,6 @@ export default function HomeScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ from?: string }>();
   const { deviceId, loading: deviceLoading } = useDeviceId();
-  const [showHistory, setShowHistory] = useState(false);
-  
-  const { data: voteStats } = trpc.votes.getDailyCount.useQuery(
-    { deviceId: deviceId ?? "" },
-    { enabled: !!deviceId }
-  );
-
-  const { data: myCards } = trpc.cards.getMyCards.useQuery(
-    { deviceId: deviceId ?? "" },
-    { enabled: !!deviceId }
-  );
-
-  const pendingCards = myCards?.filter(c => !c.isCompleted).length ?? 0;
 
   // Auto redirect to vote page only on first load (not when coming from vote/waiting/result)
   useEffect(() => {
@@ -62,20 +48,6 @@ export default function HomeScreen() {
     router.push("/vote");
   };
 
-  const handleShowHistory = () => {
-    if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    setShowHistory(true);
-  };
-
-  const handleShowFavorites = () => {
-    if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    router.push("/favorites");
-  };
-
   if (deviceLoading) {
     return (
       <ScreenContainer className="flex-1 items-center justify-center" style={styles.fill}>
@@ -96,89 +68,48 @@ export default function HomeScreen() {
           <Text style={styles.subtitle}>凭第一感觉，选出你最喜欢的那张</Text>
         </View>
 
-        {/* 我的上传 */}
-        {myCards && myCards.length > 0 && (
-          <Pressable
-            onPress={handleShowHistory}
-            style={({ pressed }) => [
-              styles.rowButton,
-              pressed && styles.rowButtonPressed,
-            ]}
-          >
-            <View style={[styles.rowIconWrap, styles.rowIconUpload]}>
-              <IconSymbol name="clock.fill" size={16} color="#ffffff" />
-            </View>
-            <Text style={styles.rowButtonText}>我的上传</Text>
-            {pendingCards > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{pendingCards}</Text>
+        <View style={styles.cardsContainer}>
+          <Pressable onPress={handleUpload} style={styles.pressable}>
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.card,
+                  styles.uploadCard,
+                  pressed && styles.cardPressed,
+                ]}
+              >
+                <View style={styles.cardIcon}>
+                  <IconSymbol name="plus.circle.fill" size={40} color="#6366F1" />
+                </View>
+                <Text style={styles.cardTitle}>我要上传</Text>
+                <Text style={styles.cardDescription}>
+                  上传 2-4 张照片，看看大家会选哪张
+                </Text>
               </View>
             )}
-            <IconSymbol name="chevron.right" size={16} color="#9CA3AF" />
-          </Pressable>
-        )}
-
-        {/* 我的收藏 */}
-        <Pressable
-          onPress={handleShowFavorites}
-          style={({ pressed }) => [
-            styles.rowButton,
-            pressed && styles.rowButtonPressed,
-          ]}
-        >
-          <View style={[styles.rowIconWrap, styles.rowIconFav]}>
-            <IconSymbol name="heart.fill" size={16} color="#ffffff" />
-          </View>
-          <Text style={styles.rowButtonText}>我的收藏</Text>
-          <IconSymbol name="chevron.right" size={16} color="#9CA3AF" />
-        </Pressable>
-
-        {/* 两个大块：缩小尺寸 */}
-        <View style={styles.cardsContainer}>
-          <Pressable
-            onPress={handleUpload}
-            style={({ pressed }) => [
-              styles.card,
-              styles.uploadCard,
-              pressed && styles.cardPressed,
-            ]}
-          >
-            <View style={styles.cardIcon}>
-              <IconSymbol name="plus.circle.fill" size={40} color="#6366F1" />
-            </View>
-            <Text style={styles.cardTitle}>我要上传</Text>
-            <Text style={styles.cardDescription}>
-              上传 2-4 张照片，看看大家会选哪张
-            </Text>
           </Pressable>
 
-          <Pressable
-            onPress={handleVote}
-            style={({ pressed }) => [
-              styles.card,
-              styles.voteCard,
-              pressed && styles.cardPressed,
-            ]}
-          >
-            <View style={styles.cardIcon}>
-              <IconSymbol name="hand.tap.fill" size={40} color="#ffffff" />
-            </View>
-            <Text style={[styles.cardTitle, styles.voteCardTitle]}>我要投票</Text>
-            <Text style={[styles.cardDescription, styles.voteCardDescription]}>
-              5秒内选出你喜欢的，帮助别人做决定
-            </Text>
-            <Text style={styles.voteCardStats}>
-              今日剩余：{voteStats?.remaining ?? 20}/20
-            </Text>
+          <Pressable onPress={handleVote} style={styles.pressable}>
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.card,
+                  styles.voteCard,
+                  pressed && styles.cardPressed,
+                ]}
+              >
+                <View style={styles.cardIcon}>
+                  <IconSymbol name="hand.tap.fill" size={40} color="#ffffff" />
+                </View>
+                <Text style={[styles.cardTitle, styles.voteCardTitle]}>我要投票</Text>
+                <Text style={[styles.cardDescription, styles.voteCardDescription]}>
+                  帮助别人做决定
+                </Text>
+              </View>
+            )}
           </Pressable>
         </View>
       </ScrollView>
-
-      {/* History Drawer */}
-      <HistoryDrawer
-        visible={showHistory}
-        onClose={() => setShowHistory(false)}
-      />
     </ScreenContainer>
   );
 }
@@ -193,12 +124,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 24,
+    paddingBottom: 20,
   },
   header: {
     alignItems: "center",
-    marginTop: 24,
-    marginBottom: 16,
+    marginTop: 18,
+    marginBottom: 12,
   },
   title: {
     fontSize: 32,
@@ -211,60 +142,22 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: "center",
   },
-  rowButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F5F5F5",
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 12,
-    gap: 12,
-  },
-  rowButtonPressed: {
-    opacity: 0.8,
-  },
-  rowIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  rowIconUpload: {
-    backgroundColor: "#6366F1",
-  },
-  rowIconFav: {
-    backgroundColor: "#EF4444",
-  },
-  rowButtonText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#11181C",
-  },
-  badge: {
-    backgroundColor: "#6366F1",
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 6,
-  },
-  badgeText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
   cardsContainer: {
-    marginTop: 8,
-    gap: 14,
+    marginTop: 6,
+    gap: 10,
+    width: "80%",
+    alignSelf: "center",
+  },
+  pressable: {
+    width: "100%",
   },
   card: {
     borderRadius: 20,
-    padding: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
     alignItems: "center",
+    width: "100%",
+    minHeight: 168,
   },
   uploadCard: {
     backgroundColor: "#F5F5F5",
@@ -273,19 +166,21 @@ const styles = StyleSheet.create({
   },
   voteCard: {
     backgroundColor: "#6366F1",
+    borderWidth: 2,
+    borderColor: "transparent",
   },
   cardPressed: {
     opacity: 0.9,
     transform: [{ scale: 0.98 }],
   },
   cardIcon: {
-    marginBottom: 10,
+    marginBottom: 8,
   },
   cardTitle: {
     fontSize: 20,
     fontWeight: "bold",
     color: "#11181C",
-    marginBottom: 4,
+    marginBottom: 6,
   },
   voteCardTitle: {
     color: "#ffffff",
@@ -294,14 +189,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#687076",
     textAlign: "center",
-    lineHeight: 18,
+    lineHeight: 17,
   },
   voteCardDescription: {
     color: "rgba(255, 255, 255, 0.9)",
-  },
-  voteCardStats: {
-    fontSize: 13,
-    color: "rgba(255, 255, 255, 0.75)",
-    marginTop: 6,
   },
 });

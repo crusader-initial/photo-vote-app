@@ -33,7 +33,10 @@ const MAPPING = {
   "cup.and.saucer.fill": "local-cafe",
   "xmark.circle.fill": "cancel",
   "person.2.fill": "people",
+  "person.fill": "person",
   "photo.stack.fill": "photo-library",
+  "rectangle.portrait.and.arrow.right": "logout",
+  "arrow.right": "arrow-forward",
 } as IconMapping;
 
 /**

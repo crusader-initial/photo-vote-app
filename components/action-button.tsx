@@ -1,4 +1,4 @@
-import { Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
+import { Text, Pressable, StyleSheet, ActivityIndicator, View, type StyleProp, type ViewStyle } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Platform } from "react-native";
 
@@ -9,6 +9,8 @@ interface ActionButtonProps {
   disabled?: boolean;
   loading?: boolean;
   size?: "small" | "medium" | "large";
+  fullWidth?: boolean;
+  style?: StyleProp<ViewStyle>;
 }
 
 export function ActionButton({
@@ -18,7 +20,22 @@ export function ActionButton({
   disabled = false,
   loading = false,
   size = "medium",
+  fullWidth = false,
+  style,
 }: ActionButtonProps) {
+  const variantStyle =
+    variant === "secondary"
+      ? styles.secondary
+      : variant === "outline"
+        ? styles.outline
+        : styles.primary;
+  const variantTextStyle =
+    variant === "secondary"
+      ? styles.secondaryText
+      : variant === "outline"
+        ? styles.outlineText
+        : styles.primaryText;
+
   const handlePress = () => {
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -39,32 +56,36 @@ export function ActionButton({
   };
 
   return (
-    <Pressable
-      onPress={handlePress}
-      disabled={disabled || loading}
-      style={({ pressed }) => [
-        styles.button,
-        styles[variant],
-        sizeStyles[size],
-        pressed && styles.pressed,
-        (disabled || loading) && styles.disabled,
-      ]}
-    >
-      {loading ? (
-        <ActivityIndicator
-          color={variant === "outline" ? "#6366F1" : "#ffffff"}
-          size="small"
-        />
-      ) : (
-        <Text
+    <Pressable onPress={handlePress} disabled={disabled || loading}>
+      {({ pressed }) => (
+        <View
           style={[
-            styles.text,
-            styles[`${variant}Text`],
-            { fontSize: textSizes[size] },
+            styles.button,
+            variantStyle,
+            fullWidth && styles.fullWidth,
+            sizeStyles[size],
+            (disabled || loading) && styles.disabled,
+            pressed && styles.pressed,
+            style,
           ]}
         >
-          {title}
-        </Text>
+          {loading ? (
+            <ActivityIndicator
+              color={variant === "outline" ? "#6366F1" : "#ffffff"}
+              size="small"
+            />
+          ) : (
+            <Text
+              style={[
+                styles.text,
+                variantTextStyle,
+                { fontSize: textSizes[size] },
+              ]}
+            >
+              {title}
+            </Text>
+          )}
+        </View>
       )}
     </Pressable>
   );
@@ -76,6 +97,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     minWidth: 120,
+    overflow: "hidden",
+  },
+  fullWidth: {
+    alignSelf: "stretch",
+    width: "100%",
   },
   primary: {
     backgroundColor: "#6366F1",

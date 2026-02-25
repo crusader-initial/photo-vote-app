@@ -1,4 +1,3 @@
-import { Platform } from "react-native";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -21,16 +20,5 @@ export function cn(...inputs: ClassValue[]) {
  */
 export function getImageUrl(url: string): string {
   if (!url || typeof url !== "string") return url;
-  if (Platform.OS !== "web" || typeof window === "undefined") return url;
-  if (window.location.hostname !== "localhost") return url;
-  try {
-    const u = new URL(url);
-    if (u.hostname === "localhost" && u.port === "3000") return url;
-    u.protocol = "http:";
-    u.hostname = "localhost";
-    u.port = "3000";
-    return u.toString();
-  } catch {
-    return url;
-  }
+  return url;
 }

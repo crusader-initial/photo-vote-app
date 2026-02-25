@@ -3,6 +3,7 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useDeviceId } from "@/hooks/use-device-id";
+import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import { getImageUrl } from "@/lib/utils";
 import * as Haptics from "expo-haptics";
@@ -14,6 +15,7 @@ interface HistoryDrawerProps {
 
 export function HistoryDrawer({ visible, onClose }: HistoryDrawerProps) {
   const router = useRouter();
+  const colors = useColors();
   const { deviceId } = useDeviceId();
 
   const utils = trpc.useUtils();
@@ -66,62 +68,61 @@ export function HistoryDrawer({ visible, onClose }: HistoryDrawerProps) {
     const progress = Math.round((item.totalVotes / 10) * 100);
 
     return (
-      <View style={styles.cardItem}>
+      <View style={[styles.cardItem, styles.cardShadow, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Pressable
           onPress={() => handleCardPress(item.id, item.isCompleted)}
-          style={({ pressed }) => [
-            styles.cardMain,
-            pressed && styles.cardItemPressed,
-          ]}
+          style={styles.cardMainPressable}
         >
-          <View style={styles.cardThumbnail}>
-            {firstPhoto && (
-              <Image
-                source={{ uri: getImageUrl(firstPhoto.url) }}
-                style={styles.thumbnail}
-                contentFit="cover"
-              />
-            )}
-          </View>
-          <View style={styles.cardInfo}>
-            <Text style={styles.cardTitle}>
-              {item.photos?.length ?? 0} 张照片
-            </Text>
-            <View style={styles.progressContainer}>
-              <View style={styles.progressBar}>
-                <View
-                  style={[styles.progressFill, { width: `${progress}%` }]}
-                />
+          {({ pressed }) => (
+            <View style={[styles.cardMain, pressed && styles.cardItemPressed]}>
+              <View style={[styles.cardThumbnail, { backgroundColor: colors.border }]}>
+                {firstPhoto && (
+                  <Image
+                    source={{ uri: getImageUrl(firstPhoto.url) }}
+                    style={styles.thumbnail}
+                    contentFit="cover"
+                  />
+                )}
               </View>
-              <Text style={styles.progressText}>
-                {item.totalVotes}/10 票
-              </Text>
+              <View style={styles.cardInfo}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>
+                  {item.photos?.length ?? 0} 张照片
+                </Text>
+                <View style={styles.progressContainer}>
+                  <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+                    <View
+                      style={[styles.progressFill, { width: `${progress}%`, backgroundColor: colors.tint }]}
+                    />
+                  </View>
+                  <Text style={[styles.progressText, { color: colors.muted }]}>
+                    {item.totalVotes}/10 票
+                  </Text>
+                </View>
+                <View style={[
+                  styles.statusBadge,
+                  item.isCompleted ? styles.statusCompleted : styles.statusPending,
+                  { backgroundColor: item.isCompleted ? "rgba(34, 197, 94, 0.12)" : "rgba(99, 102, 241, 0.12)" }
+                ]}>
+                  <Text style={[
+                    styles.statusText,
+                    item.isCompleted ? styles.statusTextCompleted : styles.statusTextPending,
+                    { color: item.isCompleted ? colors.success : colors.tint }
+                  ]}>
+                    {item.isCompleted ? "已完成" : "进行中"}
+                  </Text>
+                </View>
+              </View>
+              <IconSymbol name="chevron.right" size={20} color={colors.muted} />
             </View>
-            <View style={[
-              styles.statusBadge,
-              item.isCompleted ? styles.statusCompleted : styles.statusPending
-            ]}>
-              <Text style={[
-                styles.statusText,
-                item.isCompleted ? styles.statusTextCompleted : styles.statusTextPending
-              ]}>
-                {item.isCompleted ? "已完成" : "进行中"}
-              </Text>
-            </View>
-          </View>
-          <IconSymbol name="chevron.right" size={20} color="#9CA3AF" />
+          )}
         </Pressable>
-        <Pressable
-          onPress={() => handleDelete(item.id)}
-          style={({ pressed }) => [
-            styles.deleteButton,
-            pressed && styles.deleteButtonPressed,
-          ]}
-          hitSlop={8}
-          accessibilityLabel="删除该卡片"
-        >
-          <IconSymbol name="trash.fill" size={22} color="#EF4444" />
-          <Text style={styles.deleteLabel}>删除</Text>
+        <Pressable onPress={() => handleDelete(item.id)} hitSlop={8} accessibilityLabel="删除该卡片">
+          {({ pressed }) => (
+            <View style={[styles.deleteButton, pressed && styles.deleteButtonPressed]}>
+              <IconSymbol name="trash.fill" size={22} color="#EF4444" />
+              <Text style={styles.deleteLabel}>删除</Text>
+            </View>
+          )}
         </Pressable>
       </View>
     );
@@ -136,24 +137,30 @@ export function HistoryDrawer({ visible, onClose }: HistoryDrawerProps) {
     >
       <View style={styles.overlay}>
         <Pressable style={styles.overlayBackground} onPress={onClose} />
-        <View style={styles.drawer}>
+        <View style={[styles.drawer, { backgroundColor: colors.background }]}>
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>我的上传</Text>
-            <Pressable onPress={onClose} style={styles.closeButton}>
-              <IconSymbol name="xmark" size={24} color="#11181C" />
-            </Pressable>
+            <View style={styles.handle} />
+            <View style={styles.headerRow}>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>我的发布</Text>
+              <Pressable
+                onPress={onClose}
+                style={[styles.closeButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              >
+                <IconSymbol name="xmark" size={20} color={colors.text} />
+              </Pressable>
+            </View>
           </View>
 
           {/* Content */}
           {isLoading ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>加载中...</Text>
+              <Text style={[styles.emptyText, { color: colors.muted }]}>加载中...</Text>
             </View>
           ) : !myCards || myCards.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>暂无上传记录</Text>
-              <Text style={styles.emptyText}>上传照片后可在这里查看</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>暂无发布记录</Text>
+              <Text style={[styles.emptyText, { color: colors.muted }]}>上传照片后可在这里查看</Text>
             </View>
           ) : (
             <FlatList
@@ -180,45 +187,64 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
   drawer: {
-    backgroundColor: "#ffffff",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: "70%",
     minHeight: 300,
   },
   header: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 12,
+  },
+  handle: {
+    alignSelf: "center",
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "rgba(120, 120, 120, 0.3)",
+    marginBottom: 12,
+  },
+  headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: "bold",
-    color: "#11181C",
+    fontWeight: "700",
   },
   closeButton: {
-    padding: 4,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   listContent: {
     padding: 16,
+    alignItems: "stretch",
   },
   cardItem: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F9FAFB",
+    alignItems: "stretch",
     borderRadius: 16,
+    borderWidth: 1,
     padding: 12,
     marginBottom: 12,
     gap: 8,
+    width: "100%",
+  },
+  cardMainPressable: {
+    flex: 1,
   },
   cardMain: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    minWidth: 0,
   },
   cardItemPressed: {
     opacity: 0.8,
@@ -230,6 +256,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     justifyContent: "center",
+    flexShrink: 0,
+    alignSelf: "center",
   },
   deleteButtonPressed: {
     opacity: 0.7,
@@ -244,7 +272,6 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 12,
     overflow: "hidden",
-    backgroundColor: "#E5E7EB",
   },
   thumbnail: {
     width: "100%",
@@ -253,11 +280,15 @@ const styles = StyleSheet.create({
   cardInfo: {
     flex: 1,
     gap: 4,
+    minWidth: 0,
+    flexShrink: 1,
   },
   cardTitle: {
     fontSize: 16,
     fontWeight: "600",
     color: "#11181C",
+    flexShrink: 1,
+    minWidth: 0,
   },
   progressContainer: {
     flexDirection: "row",
@@ -267,13 +298,11 @@ const styles = StyleSheet.create({
   progressBar: {
     flex: 1,
     height: 6,
-    backgroundColor: "#E5E7EB",
     borderRadius: 3,
     overflow: "hidden",
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#6366F1",
     borderRadius: 3,
   },
   progressText: {
@@ -288,20 +317,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   statusCompleted: {
-    backgroundColor: "#DCFCE7",
   },
   statusPending: {
-    backgroundColor: "#FEF3C7",
   },
   statusText: {
     fontSize: 12,
     fontWeight: "500",
   },
   statusTextCompleted: {
-    color: "#166534",
   },
   statusTextPending: {
-    color: "#92400E",
   },
   emptyContainer: {
     flex: 1,
@@ -312,11 +337,16 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#11181C",
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 14,
-    color: "#687076",
+  },
+  cardShadow: {
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
 });

@@ -89,6 +89,60 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+export async function getUserByPhone(phone: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+const PHONE_OPENID_PREFIX = "phone:";
+export function phoneToOpenId(phone: string): string {
+  return PHONE_OPENID_PREFIX + phone.trim();
+}
+
+export async function createUserWithPhone(phone: string, passwordHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const openId = phoneToOpenId(phone);
+  const now = new Date();
+  await db.insert(users).values({
+    openId,
+    phone: phone.trim(),
+    passwordHash,
+    lastSignedIn: now,
+  });
+  return getUserByOpenId(openId);
+}
+
+/** Create user by phone only (for verification-code login; no password). */
+export async function createUserByPhone(phone: string, hermitUserUUID?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const openId = phoneToOpenId(phone);
+  const now = new Date();
+  await db.insert(users).values({
+    openId,
+    phone: phone.trim(),
+    hermitUserUUID,
+    lastSignedIn: now,
+  });
+  return getUserByOpenId(openId);
+}
+
+export async function updateUserAvatar(userId: number, avatarUrl: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ avatarUrl }).where(eq(users.id, userId));
+}
+
 // ==================== Card Operations ====================
 
 export async function createCard(data: InsertCard): Promise<number> {
@@ -181,42 +235,30 @@ export async function hasVotedOnCard(deviceId: string, cardId: number): Promise<
   return result.length > 0;
 }
 
-export async function getDailyVoteCount(deviceId: string, voteDate: string): Promise<number> {
-  const db = await getDb();
-  if (!db) return 0;
-  
-  const result = await db.select({ count: sql<number>`count(*)` }).from(votes)
-    .where(and(eq(votes.deviceId, deviceId), eq(votes.voteDate, voteDate)));
-  
-  return result[0]?.count ?? 0;
-}
-
 export async function getRandomAvailableCard(deviceId: string): Promise<Card | undefined> {
   const db = await getDb();
   if (!db) return undefined;
-  
-  // Get all incomplete cards that this device hasn't voted on
-  const votedCardIds = db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.deviceId, deviceId));
-  
-  // In development, allow voting on own cards for testing
-  // In production, users can't vote on their own cards
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  
-  const conditions = [
-    eq(cards.isCompleted, false),
-    sql`${cards.id} NOT IN (${votedCardIds})`,
-  ];
-  
-  // Only exclude own cards in production
+
+  const votedRows = await db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.deviceId, deviceId));
+  const votedCardIds = votedRows.map((r) => r.cardId);
+
+  const isDevelopment = process.env.NODE_ENV === "development";
+
+  const conditions = [eq(cards.isCompleted, false)];
+  if (votedCardIds.length > 0) {
+    conditions.push(notInArray(cards.id, votedCardIds));
+  }
   if (!isDevelopment) {
     conditions.push(sql`${cards.deviceId} != ${deviceId}`);
   }
-  
-  const result = await db.select().from(cards)
+
+  const result = await db
+    .select()
+    .from(cards)
     .where(and(...conditions))
     .orderBy(sql`RAND()`)
     .limit(1);
-  
+
   return result[0];
 }
 
@@ -229,23 +271,23 @@ export async function getRandomAvailableCards(
   const db = await getDb();
   if (!db) return [];
 
-  const votedCardIds = db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.deviceId, deviceId));
+  const votedRows = await db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.deviceId, deviceId));
+  const votedCardIds = votedRows.map((r) => r.cardId);
+  const excludeIds = [...new Set([...votedCardIds, ...excludeCardIds])];
+
   const isDevelopment = process.env.NODE_ENV === "development";
 
-  const conditions = [
-    eq(cards.isCompleted, false),
-    sql`${cards.id} NOT IN (${votedCardIds})`,
-  ];
-
+  const conditions = [eq(cards.isCompleted, false)];
+  if (excludeIds.length > 0) {
+    conditions.push(notInArray(cards.id, excludeIds));
+  }
   if (!isDevelopment) {
     conditions.push(sql`${cards.deviceId} != ${deviceId}`);
   }
 
-  if (excludeCardIds.length > 0) {
-    conditions.push(notInArray(cards.id, excludeCardIds));
-  }
-
-  const result = await db.select().from(cards)
+  const result = await db
+    .select()
+    .from(cards)
     .where(and(...conditions))
     .orderBy(sql`RAND()`)
     .limit(limit);
@@ -386,26 +428,38 @@ export async function createFavorite(data: InsertFavorite): Promise<number> {
 export async function deleteFavorite(deviceId: string, cardId: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  
   await db.delete(favorites)
     .where(and(eq(favorites.deviceId, deviceId), eq(favorites.cardId, cardId)));
+}
+
+export async function deleteFavoriteByUserId(userId: number, cardId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(favorites)
+    .where(and(eq(favorites.userId, userId), eq(favorites.cardId, cardId)));
 }
 
 export async function isFavorited(deviceId: string, cardId: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  
   const result = await db.select().from(favorites)
     .where(and(eq(favorites.deviceId, deviceId), eq(favorites.cardId, cardId)))
     .limit(1);
-  
+  return result.length > 0;
+}
+
+export async function isFavoritedByUserId(userId: number, cardId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db.select().from(favorites)
+    .where(and(eq(favorites.userId, userId), eq(favorites.cardId, cardId)))
+    .limit(1);
   return result.length > 0;
 }
 
 export async function getFavoritesByDeviceId(deviceId: string): Promise<{ cardId: number; createdAt: Date }[]> {
   const db = await getDb();
   if (!db) return [];
-  
   const result = await db.select({
     cardId: favorites.cardId,
     createdAt: favorites.createdAt,
@@ -413,6 +467,18 @@ export async function getFavoritesByDeviceId(deviceId: string): Promise<{ cardId
     .from(favorites)
     .where(eq(favorites.deviceId, deviceId))
     .orderBy(desc(favorites.createdAt));
-  
+  return result;
+}
+
+export async function getFavoritesByUserId(userId: number): Promise<{ cardId: number; createdAt: Date }[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const result = await db.select({
+    cardId: favorites.cardId,
+    createdAt: favorites.createdAt,
+  })
+    .from(favorites)
+    .where(eq(favorites.userId, userId))
+    .orderBy(desc(favorites.createdAt));
   return result;
 }

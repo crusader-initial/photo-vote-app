@@ -11,10 +11,18 @@ export const users = mysqlTable("users", {
    * Use this for relations between tables.
    */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
+  /** Manus OAuth identifier (openId) or "phone:xxx" for phone login. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
+  /** Phone number for phone login; unique when set. */
+  phone: varchar("phone", { length: 20 }).unique(),
+  /** bcrypt/pbkdf2 hash for phone login; only set when user registered with phone. */
+  passwordHash: varchar("passwordHash", { length: 255 }),
+  /** User UUID from Hermit Purple Java service (optional). */
+  hermitUserUUID: varchar("hermitUserUUID", { length: 64 }),
+  /** Avatar image URL (uploaded by user). */
+  avatarUrl: varchar("avatarUrl", { length: 512 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -105,12 +113,15 @@ export type InsertComment = typeof comments.$inferInsert;
 
 /**
  * Favorites table - stores user's favorite cards (only after voting)
+ * When user is logged in by phone, userId is set; otherwise deviceId is used.
  */
 export const favorites = mysqlTable("favorites", {
   id: int("id").autoincrement().primaryKey(),
   /** Reference to the card being favorited */
   cardId: int("cardId").notNull(),
-  /** Device ID of the user who favorited */
+  /** User ID when logged in by phone; null when using deviceId only */
+  userId: int("userId"),
+  /** Device ID of the user who favorited (fallback when not logged in) */
   deviceId: varchar("deviceId", { length: 64 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

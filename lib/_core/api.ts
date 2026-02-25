@@ -129,6 +129,8 @@ export async function getMe(): Promise<{
   openId: string;
   name: string | null;
   email: string | null;
+  phone: string | null;
+  avatarUrl: string | null;
   loginMethod: string | null;
   lastSignedIn: string;
 } | null> {
@@ -139,6 +141,26 @@ export async function getMe(): Promise<{
     console.error("[API] getMe failed:", error);
     return null;
   }
+}
+
+// Send verification code (no real SMS; backend only validates phone format)
+export async function sendVerificationCode(phone: string): Promise<{ success: boolean }> {
+  return apiCall<{ success: boolean }>("/api/auth/phone-send-code", {
+    method: "POST",
+    body: JSON.stringify({ phone: phone.trim() }),
+  });
+}
+
+// Phone login with verification code (any 6-digit code is accepted when SMS not integrated)
+export async function phoneLoginWithCode(phone: string, code: string): Promise<{
+  user: { id: number; openId: string; name: string | null; email: string | null; phone: string | null; avatarUrl: string | null; loginMethod: string | null; lastSignedIn: string };
+  token: string;
+}> {
+  const result = await apiCall<{ user: any; token: string }>("/api/auth/phone-login", {
+    method: "POST",
+    body: JSON.stringify({ phone: phone.trim(), code: code.trim() }),
+  });
+  return result;
 }
 
 // Establish session cookie on the backend (3000-xxx domain)

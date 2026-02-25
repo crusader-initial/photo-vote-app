@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { View, Text, Pressable, StyleSheet, Alert, Platform, ScrollView, ActivityIndicator } from "react-native";
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Alert,
+  Platform,
+  ScrollView,
+  ActivityIndicator,
+  Image as RNImage,
+} from "react-native";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
@@ -40,6 +50,15 @@ export default function CreateScreen() {
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
+      console.log(
+        "[create] picker assets:",
+        result.assets.map((a) => ({
+          uri: a.uri,
+          mimeType: a.mimeType,
+          hasBase64: !!a.base64,
+          base64Len: a.base64?.length ?? 0,
+        }))
+      );
       // 处理选中的所有图片
       const newPhotos: SelectedPhoto[] = [];
       
@@ -93,14 +112,14 @@ export default function CreateScreen() {
     setIsProcessing(true);
 
     try {
-      if (Platform.OS === "web") {
-        // 网页端：用内存暂存，避免 localStorage 约 5MB 限制导致存图失败
-        setTempPhotos(photos);
-        router.push("/self-guess");
-      } else {
+      // 先写入内存，保证页面跳转后可立即读取
+      setTempPhotos(photos);
+
+      if (Platform.OS !== "web") {
         await AsyncStorage.setItem(TEMP_PHOTOS_KEY, JSON.stringify(photos));
-        router.push("/self-guess");
       }
+
+      router.push("/self-guess");
     } catch (error) {
       console.error("Failed to save photos:", error);
       Alert.alert("错误", "保存照片失败，请重试");
@@ -132,24 +151,28 @@ export default function CreateScreen() {
 
         {/* Upload Button - 大按钮 */}
         {photos.length < 4 && (
-          <Pressable
-            onPress={pickImage}
-            style={({ pressed }) => [
-              styles.uploadButton,
-              pressed && styles.uploadButtonPressed,
-            ]}
-          >
-            <View style={styles.uploadButtonIcon}>
-              <IconSymbol name="photo.stack.fill" size={48} color="#6366F1" />
-            </View>
-            <Text style={styles.uploadButtonTitle}>
-              {photos.length === 0 ? "上传照片" : "继续添加照片"}
-            </Text>
-            <Text style={styles.uploadButtonSubtitle}>
-              {photos.length === 0 
-                ? "点击选择 2~4 张照片" 
-                : `已选 ${photos.length} 张，还可添加 ${4 - photos.length} 张`}
-            </Text>
+          <Pressable onPress={pickImage}>
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.uploadButton,
+                  Platform.OS === "android" && styles.uploadButtonAndroid,
+                  pressed && styles.uploadButtonPressed,
+                ]}
+              >
+                <View style={styles.uploadButtonIcon}>
+                  <IconSymbol name="photo.stack.fill" size={48} color="#6366F1" />
+                </View>
+                <Text style={styles.uploadButtonTitle}>
+                  {photos.length === 0 ? "上传照片" : "继续添加照片"}
+                </Text>
+                <Text style={styles.uploadButtonSubtitle}>
+                  {photos.length === 0
+                    ? "点击选择 2~4 张照片"
+                    : `已选 ${photos.length} 张，还可添加 ${4 - photos.length} 张`}
+                </Text>
+              </View>
+            )}
           </Pressable>
         )}
 
@@ -163,10 +186,12 @@ export default function CreateScreen() {
               {photos.map((photo, index) => (
                 <View key={index} style={styles.gridItem}>
                   <View style={styles.photoContainer}>
-                    <Image
-                      source={{ uri: photo.uri }}
+                    <RNImage
+                      source={{
+                        uri: photo.base64 ? `data:${photo.mimeType};base64,${photo.base64}` : photo.uri,
+                      }}
                       style={styles.photo}
-                      contentFit="cover"
+                      resizeMode="cover"
                     />
                     <Pressable
                       onPress={() => removePhoto(index)}
@@ -200,6 +225,9 @@ export default function CreateScreen() {
                 title="下一步"
                 onPress={handleNext}
                 size="large"
+                fullWidth
+                variant="primary"
+                style={styles.nextButton}
               />
             )}
           </View>
@@ -246,10 +274,15 @@ const styles = StyleSheet.create({
     borderColor: "#6366F1",
     borderStyle: "dashed",
     marginBottom: 32,
+    width: "100%",
+    alignSelf: "stretch",
   },
   uploadButtonPressed: {
     backgroundColor: "#E5E7EB",
     opacity: 0.9,
+  },
+  uploadButtonAndroid: {
+    borderStyle: "solid",
   },
   uploadButtonIcon: {
     marginBottom: 16,
@@ -276,11 +309,12 @@ const styles = StyleSheet.create({
   gridContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    justifyContent: "space-between",
   },
   gridItem: {
-    width: "31%",
+    width: "48%",
     aspectRatio: 1,
+    marginBottom: 12,
   },
   photoContainer: {
     flex: 1,
@@ -306,6 +340,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 16,
     paddingTop: 16,
+    width: "100%",
+  },
+  nextButton: {
+    backgroundColor: "#6366F1",
+    borderRadius: 12,
+    minHeight: 52,
   },
   successText: {
     fontSize: 16,

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { View, Text, Pressable, StyleSheet, Dimensions, Platform, ActivityIndicator, TextInput, KeyboardAvoidingView, ScrollView as RNScrollView, Modal, Image as RNImage } from "react-native";
+import { View, Text, Pressable, StyleSheet, Dimensions, Platform, ActivityIndicator, TextInput, KeyboardAvoidingView, ScrollView as RNScrollView, Modal, Image as RNImage, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useDeviceId } from "@/hooks/use-device-id";
+import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
 import { getImageUrl } from "@/lib/utils";
 import Animated, {
@@ -11,21 +12,14 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withSpring,
-  Easing,
-  interpolateColor,
   runOnJS,
-  interpolate,
-  Extrapolation,
 } from "react-native-reanimated";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-const VOTE_DURATION = 5;
 const SWIPE_THRESHOLD = SCREEN_HEIGHT * 0.08; // 8% 屏高，轻滑即可切换
-const TIMEOUT_LIMIT = 10; // 10次超时后提示休息
-const TIMEOUT_COUNT_KEY = "@vote_timeout_count";
 const SKIP_VOTE_REDIRECT_KEY = "@skip_vote_redirect";
 const PREFETCH_COUNT = 3; // 预加载卡片数量
 const RECENT_IDS_MAX = 20; // 排除最近展示的卡片 ID 数量，避免马上又出现
@@ -40,6 +34,7 @@ export default function VoteScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { deviceId, loading: deviceLoading } = useDeviceId();
+  const { user } = useAuth();
   
   // Current card state
   const [currentCard, setCurrentCard] = useState<VoteCardData | null>(null);
@@ -58,19 +53,12 @@ export default function VoteScreen() {
   
   // Favorite state
   const [isFavorited, setIsFavorited] = useState(false);
-  
-  // Timeout tracking state
-  const [timeoutCount, setTimeoutCount] = useState(0);
-  const [showBreakModal, setShowBreakModal] = useState(false);
-  
-  // Timer
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timeLeftRef = useRef(VOTE_DURATION);
+
+  // Navigation history
+  const [previousCards, setPreviousCards] = useState<VoteCardData[]>([]);
   
   // Animation values
   const translateY = useSharedValue(0);
-  const progress = useSharedValue(1);
-  const timeLeft = useSharedValue(VOTE_DURATION);
   const cardOpacity = useSharedValue(1);
 
   const utils = trpc.useUtils();
@@ -85,21 +73,6 @@ export default function VoteScreen() {
     });
     return batch as VoteCardData[];
   }, [deviceId, utils.cards.getRandomForVotingBatch]);
-
-  // Load timeout count on mount
-  useEffect(() => {
-    const loadTimeoutCount = async () => {
-      try {
-        const stored = await AsyncStorage.getItem(TIMEOUT_COUNT_KEY);
-        if (stored) {
-          setTimeoutCount(parseInt(stored, 10));
-        }
-      } catch (error) {
-        console.error("Failed to load timeout count:", error);
-      }
-    };
-    loadTimeoutCount();
-  }, []);
 
   // 初始加载或队列被清空时：拉取一批卡片
   useEffect(() => {
@@ -118,11 +91,6 @@ export default function VoteScreen() {
         setQueueLoading(false);
       });
   }, [deviceId, cardQueue.length, isTransitioning, fetchBatch]);
-
-  const { data: voteStats, refetch: refetchStats } = trpc.votes.getDailyCount.useQuery(
-    { deviceId: deviceId ?? "" },
-    { enabled: !!deviceId }
-  );
 
   const submitVoteMutation = trpc.votes.submit.useMutation({
     onSuccess: (data) => {
@@ -186,22 +154,30 @@ export default function VoteScreen() {
 
   const handleSubmitComment = useCallback(() => {
     if (!commentText.trim() || !currentCard || !deviceId) return;
-    
+    if (!user) {
+      if (Platform.OS === "web") window.alert("请先登录后评论");
+      else Alert.alert("提示", "请先登录后评论", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
+      return;
+    }
     createCommentMutation.mutate({
       cardId: currentCard.id,
       deviceId,
       content: commentText.trim(),
     });
-  }, [commentText, currentCard, deviceId, createCommentMutation]);
+  }, [commentText, currentCard, deviceId, createCommentMutation, user, router]);
 
   const handleToggleFavorite = useCallback(() => {
     if (!currentCard || !deviceId) return;
-    
+    if (!user) {
+      if (Platform.OS === "web") window.alert("请先登录后收藏");
+      else Alert.alert("提示", "请先登录后收藏", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
+      return;
+    }
     toggleFavoriteMutation.mutate({
       cardId: currentCard.id,
       deviceId,
     });
-  }, [currentCard, deviceId, toggleFavoriteMutation]);
+  }, [currentCard, deviceId, toggleFavoriteMutation, user, router]);
 
   // 预加载当前卡片及队列中所有卡片的图片
   useEffect(() => {
@@ -214,21 +190,6 @@ export default function VoteScreen() {
     });
   }, [currentCard, cardQueue]);
 
-  const stopTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-
-  const goToNextCard = useCallback(() => {
-    setIsTransitioning(true);
-    stopTimer();
-    cardOpacity.value = withTiming(0, { duration: 150 }, () => {
-      runOnJS(resetAndFetchNext)();
-    });
-  }, [stopTimer]);
-
   const resetAndFetchNext = useCallback(() => {
     setShowResult(false);
     setVoteResult(null);
@@ -239,9 +200,10 @@ export default function VoteScreen() {
     setIsFavorited(false);
     translateY.value = 0;
     cardOpacity.value = 1;
-    refetchStats();
-
     const prevId = currentCard?.id;
+    if (currentCard) {
+      setPreviousCards((prev) => [...prev, currentCard]);
+    }
     if (prevId != null) {
       recentCardIdsRef.current = [
         prevId,
@@ -269,133 +231,99 @@ export default function VoteScreen() {
     setTimeout(() => {
       setIsTransitioning(false);
     }, 50);
-  }, [currentCard, cardQueue, fetchBatch, refetchStats]);
+  }, [currentCard, cardQueue, fetchBatch, setPreviousCards]);
 
-  const handleTimeUp = useCallback(() => {
-    stopTimer();
-    
-    // Increment timeout count
-    const newCount = timeoutCount + 1;
-    setTimeoutCount(newCount);
-    AsyncStorage.setItem(TIMEOUT_COUNT_KEY, newCount.toString()).catch(console.error);
-    
-    // Check if reached timeout limit
-    if (newCount >= TIMEOUT_LIMIT) {
-      setShowBreakModal(true);
-      // Don't go to next card automatically
-    } else {
-      goToNextCard();
-    }
-  }, [stopTimer, goToNextCard, timeoutCount]);
+  const resetAndShowPrevious = useCallback(() => {
+    setShowResult(false);
+    setVoteResult(null);
+    setSelectedPhotoId(null);
+    setAllPhotoStats([]);
+    setShowComments(false);
+    setCommentText("");
+    setIsFavorited(false);
+    translateY.value = 0;
+    cardOpacity.value = 1;
 
-  const startTimer = useCallback(() => {
-    stopTimer();
-    timeLeftRef.current = VOTE_DURATION;
-    progress.value = 1;
-    timeLeft.value = VOTE_DURATION;
-    
-    progress.value = withTiming(0, {
-      duration: VOTE_DURATION * 1000,
-      easing: Easing.linear,
+    setPreviousCards((prev) => {
+      if (prev.length === 0) return prev;
+      const newPrev = [...prev];
+      const previousCard = newPrev.pop()!;
+      setCardQueue((queue) => (currentCard ? [currentCard, ...queue] : queue));
+      setCurrentCard(previousCard);
+      return newPrev;
     });
 
-    timerRef.current = setInterval(() => {
-      timeLeftRef.current -= 1;
-      timeLeft.value = timeLeftRef.current;
-      
-      if (timeLeftRef.current <= 0) {
-        stopTimer();
-        handleTimeUp();
-      }
-    }, 1000);
-  }, [handleTimeUp, stopTimer]);
+    setTimeout(() => {
+      setIsTransitioning(false);
+    }, 50);
+  }, [currentCard]);
 
-  // Start timer when card is ready
-  useEffect(() => {
-    if (currentCard && !showResult && !selectedPhotoId) {
-      startTimer();
-    }
-    return () => stopTimer();
-  }, [currentCard?.id, showResult]);
+  const goToNextCard = useCallback(() => {
+    setIsTransitioning(true);
+    cardOpacity.value = withTiming(0, { duration: 150 }, () => {
+      runOnJS(resetAndFetchNext)();
+    });
+  }, [resetAndFetchNext]);
+
+  const goToPreviousCard = useCallback(() => {
+    if (previousCards.length === 0 || isTransitioning) return;
+    setIsTransitioning(true);
+    cardOpacity.value = withTiming(0, { duration: 150 }, () => {
+      runOnJS(resetAndShowPrevious)();
+    });
+  }, [previousCards.length, isTransitioning, resetAndShowPrevious]);
 
   const handleSelectPhoto = useCallback((photoId: number) => {
     if (selectedPhotoId !== null || !deviceId || !currentCard) return;
+    if (!user) {
+      if (Platform.OS === "web") window.alert("请先登录后再投票");
+      else Alert.alert("提示", "请先登录后再投票", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
+      return;
+    }
 
     setSelectedPhotoId(photoId);
-    stopTimer();
-    
-    // Reset timeout count on successful vote
-    setTimeoutCount(0);
-    AsyncStorage.setItem(TIMEOUT_COUNT_KEY, "0").catch(console.error);
 
     submitVoteMutation.mutate({
       deviceId,
       cardId: currentCard.id,
       photoId,
     });
-  }, [selectedPhotoId, deviceId, currentCard, stopTimer, submitVoteMutation]);
-
-  const handleBack = useCallback(() => {
-    stopTimer();
-    router.push("/(tabs)");
-  }, [stopTimer, router]);
+  }, [selectedPhotoId, deviceId, currentCard, submitVoteMutation, user, router]);
 
   const handleTakeBreak = useCallback(() => {
-    stopTimer(); // 停止计时器
-    setShowBreakModal(false);
-    // Reset timeout count
-    setTimeoutCount(0);
-    AsyncStorage.setItem(TIMEOUT_COUNT_KEY, "0").catch(console.error);
     AsyncStorage.setItem(SKIP_VOTE_REDIRECT_KEY, "1").catch(console.error);
     router.replace("/");
-  }, [router, stopTimer]);
+  }, [router]);
 
-  const handleContinueVoting = useCallback(() => {
-    setShowBreakModal(false);
-    // Reset timeout count
-    setTimeoutCount(0);
-    AsyncStorage.setItem(TIMEOUT_COUNT_KEY, "0").catch(console.error);
-    goToNextCard();
-  }, [goToNextCard]);
-
-  // Swipe gesture - always enabled (can skip voting or go to next)
+  // Swipe gesture - 上滑上一张，下滑下一张
   const swipeGesture = useMemo(() => 
     Gesture.Pan()
-      .enabled(true) // 始终启用，允许下滑跳过投票
+      .enabled(true)
       .onUpdate((event) => {
-        if (event.translationY < 0) {
-          translateY.value = event.translationY;
-        }
+        translateY.value = event.translationY;
       })
       .onEnd((event) => {
-        if (event.translationY < -SWIPE_THRESHOLD) {
-          if (showBreakModal) {
-            // 休息弹窗时：下滑继续投票
-            translateY.value = withTiming(-SCREEN_HEIGHT, { duration: 200, easing: Easing.out(Easing.cubic) }, () => {
-              runOnJS(handleContinueVoting)();
-            });
-          } else if (showResult) {
-            // 评论区抽屉打开时不允许切换下一张，先关闭抽屉
-            if (showComments) {
-              translateY.value = withSpring(0, { damping: 15 });
-              return;
-            }
-            // 结果页面：下滑到下一个
-            translateY.value = withTiming(-SCREEN_HEIGHT, { duration: 200, easing: Easing.out(Easing.cubic) }, () => {
-              runOnJS(goToNextCard)();
-            });
-          } else {
-            // 投票阶段：下滑跳过（当作超时处理）
-            translateY.value = withTiming(-SCREEN_HEIGHT, { duration: 200, easing: Easing.out(Easing.cubic) }, () => {
-              runOnJS(handleTimeUp)();
-            });
+        if (event.translationY <= -SWIPE_THRESHOLD) {
+          // 上滑：查看上一张
+          translateY.value = withTiming(-SCREEN_HEIGHT, { duration: 200 }, () => {
+            runOnJS(goToPreviousCard)();
+          });
+        } else if (event.translationY >= SWIPE_THRESHOLD) {
+          // 下滑：查看下一张
+          if (showResult && showComments) {
+            // 评论区打开时先保持当前卡片
+            translateY.value = withSpring(0, { damping: 15 });
+            return;
           }
+          translateY.value = withTiming(SCREEN_HEIGHT, { duration: 200 }, () => {
+            runOnJS(goToNextCard)();
+          });
         } else {
           translateY.value = withSpring(0, { damping: 15 });
         }
       })
       .runOnJS(true),
-    [showResult, showBreakModal, showComments, goToNextCard, handleContinueVoting, handleTimeUp]
+    [showResult, showComments, goToNextCard, goToPreviousCard]
   );
 
   // Animated styles
@@ -404,60 +332,11 @@ export default function VoteScreen() {
     opacity: cardOpacity.value,
   }));
 
-  const animatedBarStyle = useAnimatedStyle(() => {
-    const backgroundColor = interpolateColor(
-      progress.value,
-      [0, 0.3, 0.6, 1],
-      ["#EF4444", "#F59E0B", "#22C55E", "#22C55E"]
-    );
-    return {
-      width: `${progress.value * 100}%`,
-      backgroundColor,
-    };
-  });
-
-  const animatedTimeStyle = useAnimatedStyle(() => {
-    const color = interpolateColor(
-      progress.value,
-      [0, 0.3, 0.6, 1],
-      ["#EF4444", "#F59E0B", "#22C55E", "#22C55E"]
-    );
-    return { color };
-  });
-
-  const swipeHintStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(
-      translateY.value,
-      [-100, -50, 0],
-      [1, 0.5, 0.3],
-      Extrapolation.CLAMP
-    );
-    return { opacity };
-  });
-
   // Loading state
   if (deviceLoading) {
     return (
       <View style={[styles.fullScreen, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color="#6366F1" />
-      </View>
-    );
-  }
-
-  // Daily limit reached
-  if (voteStats && voteStats.remaining <= 0) {
-    return (
-      <View style={[styles.fullScreen, { paddingTop: insets.top }]}>
-        <Pressable onPress={handleTakeBreak} style={styles.restButton}>
-          <IconSymbol name="xmark" size={24} color="#ffffff" />
-        </Pressable>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>今日投票次数已用完</Text>
-          <Text style={styles.emptySubtitle}>明天再来继续投票吧</Text>
-          <Pressable onPress={handleTakeBreak} style={styles.backHomeButton}>
-            <Text style={styles.backHomeText}>返回首页</Text>
-          </Pressable>
-        </View>
       </View>
     );
   }
@@ -505,21 +384,6 @@ export default function VoteScreen() {
             <Pressable onPress={handleTakeBreak} style={styles.restButton}>
               <IconSymbol name="house.fill" size={24} color="rgba(255,255,255,0.8)" />
             </Pressable>
-            
-            {!showResult && (
-              <View style={styles.timerContainer}>
-                <View style={styles.timerBar}>
-                  <Animated.View style={[styles.timerFill, animatedBarStyle]} />
-                </View>
-                <Animated.Text style={[styles.timerText, animatedTimeStyle]}>
-                  {Math.ceil(timeLeft.value)}s
-                </Animated.Text>
-              </View>
-            )}
-            
-            <View style={styles.statsContainer}>
-              <Text style={styles.statsText}>{voteStats?.remaining ?? 20}/20</Text>
-            </View>
           </View>
 
           {/* Main content */}
@@ -528,8 +392,11 @@ export default function VoteScreen() {
               // Voting mode
               <>
                 <Text style={styles.title}>选择你喜欢的</Text>
-                <Text style={styles.subtitle}>5秒内选择 · 上滑跳过</Text>
-                
+                {!user && (
+                  <Pressable onPress={() => router.push("/login")} style={styles.loginHint}>
+                    <Text style={styles.loginHintText}>登录后可投票、评论、收藏</Text>
+                  </Pressable>
+                )}
                 <View style={styles.photosGrid}>
                   {currentCard!.photos.map((photo, index) => (
                     <Pressable
@@ -556,9 +423,9 @@ export default function VoteScreen() {
               // Result mode
               <>
                 <Text style={styles.title}>投票结果</Text>
-                <Text style={styles.subtitle}>
-                  {showComments ? "点击关闭评论区" : "上滑查看下一个"}
-                </Text>
+                {showComments ? (
+                  <Text style={styles.subtitle}>点击关闭评论区</Text>
+                ) : null}
                 
                 <View style={styles.resultsList}>
                   {currentCard!.photos.map((photo) => {
@@ -649,54 +516,13 @@ export default function VoteScreen() {
                   </Pressable>
                 </View>
 
-                {/* Swipe hint - 关闭评论区抽屉后才能上滑下一张 */}
-                {!showComments ? (
-                  <Animated.View style={[styles.swipeHint, swipeHintStyle]}>
-                    <IconSymbol name="chevron.up" size={24} color="rgba(255,255,255,0.6)" />
-                    <Text style={styles.swipeHintText}>上滑继续</Text>
-                  </Animated.View>
-                ) : null}
+                {/* Swipe hint removed */}
               </>
             )}
           </View>
         </Animated.View>
       </GestureDetector>
       
-      {/* Break Modal */}
-      <Modal
-        visible={showBreakModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {}}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalIcon}>
-              <IconSymbol name="cup.and.saucer.fill" size={64} color="#6366F1" />
-            </View>
-            
-            <Text style={styles.modalTitle}>该休息一下啦</Text>
-            <Text style={styles.modalSubtitle}>
-              你已经连续{timeoutCount}次超时未选择{"\n"}
-              放松一下，稍后再来投票吧
-            </Text>
-            
-            <View style={styles.modalActions}>
-              <Pressable
-                onPress={handleTakeBreak}
-                style={({ pressed }) => [
-                  styles.modalButton,
-                  styles.modalButtonPrimary,
-                  pressed && styles.modalButtonPressed,
-                ]}
-              >
-                <Text style={styles.modalButtonTextPrimary}>休息一下</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       {/* 评论区抽屉 - 从底部弹出，关闭后才能上滑下一张 */}
       <Modal
         visible={showComments && !!(commentsData?.canView)}
@@ -725,25 +551,26 @@ export default function VoteScreen() {
               <View style={styles.drawerInputRow}>
                 <TextInput
                   style={styles.drawerInput}
-                  placeholder="写下你的想法..."
+                  placeholder={user ? "写下你的想法..." : "请先登录后评论"}
                   placeholderTextColor="#9CA3AF"
                   value={commentText}
                   onChangeText={setCommentText}
                   multiline
                   maxLength={500}
+                  editable={!!user}
                 />
                 <Pressable
                   onPress={handleSubmitComment}
-                  disabled={!commentText.trim() || createCommentMutation.isPending}
+                  disabled={!user || !commentText.trim() || createCommentMutation.isPending}
                   style={[
                     styles.drawerSendBtn,
-                    (!commentText.trim() || createCommentMutation.isPending) && styles.drawerSendBtnDisabled,
+                    (!user || !commentText.trim() || createCommentMutation.isPending) && styles.drawerSendBtnDisabled,
                   ]}
                 >
                   <IconSymbol
                     name="paperplane.fill"
                     size={20}
-                    color={commentText.trim() && !createCommentMutation.isPending ? "#ffffff" : "#D1D5DB"}
+                    color={user && commentText.trim() && !createCommentMutation.isPending ? "#ffffff" : "#D1D5DB"}
                   />
                 </Pressable>
               </View>
@@ -891,17 +718,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     width: 30,
   },
-  statsContainer: {
-    backgroundColor: "rgba(255,255,255,0.15)",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  statsText: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
   content: {
     flex: 1,
     width: "100%",
@@ -921,6 +737,15 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.6)",
     textAlign: "center",
     marginBottom: 24,
+  },
+  loginHint: {
+    marginBottom: 12,
+    alignSelf: "center",
+  },
+  loginHintText: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.8)",
+    textDecorationLine: "underline",
   },
   photosGrid: {
     flex: 1,
@@ -1029,15 +854,6 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.5)",
     textAlign: "center",
     marginTop: 16,
-  },
-  swipeHint: {
-    alignItems: "center",
-    marginTop: 24,
-  },
-  swipeHintText: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 14,
-    marginTop: 4,
   },
   emptyContainer: {
     flex: 1,

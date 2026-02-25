@@ -2,11 +2,9 @@ import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const.js";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { storagePut } from "./storage";
-import * as fs from "fs";
-import * as path from "path";
 
 export const appRouter = router({
   system: systemRouter,
@@ -19,6 +17,24 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
+  }),
+
+  // User operations
+  users: router({
+    updateAvatar: protectedProcedure
+      .input(z.object({
+        base64: z.string(),
+        mimeType: z.string(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const randomSuffix = Math.random().toString(36).substring(2, 10);
+        const extension = input.mimeType.split("/")[1] || "jpg";
+        const fileKey = `avatars/${ctx.user.id}-${randomSuffix}.${extension}`;
+        const buffer = Buffer.from(input.base64, "base64");
+        const { url } = await storagePut(fileKey, buffer, input.mimeType);
+        await db.updateUserAvatar(ctx.user.id, url);
+        return { avatarUrl: url };
+      }),
   }),
 
   // Card operations
@@ -40,52 +56,21 @@ export const appRouter = router({
           predictedPhotoIndex: input.predictedPhotoIndex,
         });
 
-        // Upload photos and create photo records
+        // Upload photos to OSS and create photo records
         const photoRecords = await Promise.all(
           input.photos.map(async (photo, index) => {
-            // Check if we should use cloud storage or local storage
-            const useCloudStorage = process.env.BUILT_IN_FORGE_API_KEY && 
-                                   process.env.BUILT_IN_FORGE_API_KEY !== 'your-api-key';
-            
-            let url: string;
-            
-            if (useCloudStorage) {
-              // Upload to S3/OSS
-              const randomSuffix = Math.random().toString(36).substring(2, 10);
-              const extension = photo.mimeType.split('/')[1] || 'jpg';
-              const fileKey = `cards/${cardId}/photo-${index}-${randomSuffix}.${extension}`;
-              const buffer = Buffer.from(photo.base64, 'base64');
-              const result = await storagePut(fileKey, buffer, photo.mimeType);
-              url = result.url;
-            } else {
-              // Save to local file system
-              const randomSuffix = Math.random().toString(36).substring(2, 10);
-              const extension = photo.mimeType.split('/')[1] || 'jpg';
-              const filename = `card-${cardId}-photo-${index}-${randomSuffix}.${extension}`;
-              const uploadDir = path.join(process.cwd(), 'uploads');
-              const filepath = path.join(uploadDir, filename);
-              
-              // Ensure upload directory exists
-              if (!fs.existsSync(uploadDir)) {
-                fs.mkdirSync(uploadDir, { recursive: true });
-              }
-              
-              // Write file
-              const buffer = Buffer.from(photo.base64, 'base64');
-              fs.writeFileSync(filepath, buffer);
-              
-              // Return full URL for local development
-              // In production with reverse proxy, this should be the public URL
-              const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:3000';
-              url = `${baseUrl}/uploads/${filename}`;
-            }
-            
+            const randomSuffix = Math.random().toString(36).substring(2, 10);
+            const extension = photo.mimeType.split("/")[1] || "jpg";
+            const fileKey = `cards/${cardId}/photo-${index}-${randomSuffix}.${extension}`;
+            const buffer = Buffer.from(photo.base64, "base64");
+            const { url } = await storagePut(fileKey, buffer, photo.mimeType);
+
             return {
               cardId,
               url,
               photoIndex: index,
             };
-          })
+          }),
         );
 
         await db.createPhotos(photoRecords);
@@ -165,8 +150,8 @@ export const appRouter = router({
 
   // Vote operations
   votes: router({
-    // Submit a vote
-    submit: publicProcedure
+    // Submit a vote (requires login)
+    submit: protectedProcedure
       .input(z.object({
         deviceId: z.string().min(1),
         cardId: z.number(),
@@ -179,13 +164,7 @@ export const appRouter = router({
           throw new Error("Already voted on this card");
         }
 
-        // Check daily vote limit
         const today = new Date().toISOString().split('T')[0];
-        const dailyCount = await db.getDailyVoteCount(input.deviceId, today);
-        if (dailyCount >= 20) {
-          throw new Error("Daily vote limit reached");
-        }
-
         // Create the vote
         await db.createVote({
           deviceId: input.deviceId,
@@ -230,29 +209,23 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return db.hasVotedOnCard(input.deviceId, input.cardId);
       }),
-
-    // Get daily vote count for a device
-    getDailyCount: publicProcedure
-      .input(z.object({ deviceId: z.string() }))
-      .query(async ({ input }) => {
-        const today = new Date().toISOString().split('T')[0];
-        const count = await db.getDailyVoteCount(input.deviceId, today);
-        return { count, limit: 20, remaining: Math.max(0, 20 - count) };
-      }),
   }),
 
-  // Comment operations
+  // Comment operations（按「当前用户」是否投过票/已收藏判断，非按当前设备）
   comments: router({
-    // Get comments for a card (only if user has voted)
+    // 当前用户可查看评论：本设备投过 / 本设备收藏 / 已登录且该用户收藏（收藏即表示用户曾投过票）
     getByCardId: publicProcedure
       .input(z.object({
         cardId: z.number(),
         deviceId: z.string(),
       }))
-      .query(async ({ input }) => {
-        // Check if user has voted on this card
-        const hasVoted = await db.hasVotedOnCard(input.deviceId, input.cardId);
-        if (!hasVoted) {
+      .query(async ({ input, ctx }) => {
+        const hasVotedOnDevice = await db.hasVotedOnCard(input.deviceId, input.cardId);
+        const hasFavoritedOnDevice = await db.isFavorited(input.deviceId, input.cardId);
+        const hasFavoritedByUser =
+          ctx.user?.id != null && (await db.isFavoritedByUserId(ctx.user.id, input.cardId));
+        const canView = hasVotedOnDevice || hasFavoritedOnDevice || hasFavoritedByUser;
+        if (!canView) {
           return { comments: [], canView: false };
         }
 
@@ -272,16 +245,19 @@ export const appRouter = router({
         return { comments: commentsWithVotes, canView: true };
       }),
 
-    // 获取某条评论下的回复（楼中楼）
+    // 获取某条评论下的回复（与 getByCardId 一致：按当前用户是否可查看）
     getReplies: publicProcedure
       .input(z.object({
         parentId: z.number(),
         cardId: z.number(),
         deviceId: z.string(),
       }))
-      .query(async ({ input }) => {
-        const hasVoted = await db.hasVotedOnCard(input.deviceId, input.cardId);
-        if (!hasVoted) {
+      .query(async ({ input, ctx }) => {
+        const hasVotedOnDevice = await db.hasVotedOnCard(input.deviceId, input.cardId);
+        const hasFavoritedOnDevice = await db.isFavorited(input.deviceId, input.cardId);
+        const hasFavoritedByUser =
+          ctx.user?.id != null && (await db.isFavoritedByUserId(ctx.user.id, input.cardId));
+        if (!hasVotedOnDevice && !hasFavoritedOnDevice && !hasFavoritedByUser) {
           return { replies: [], parentDeviceId: null };
         }
         const parent = await db.getCommentById(input.parentId);
@@ -301,18 +277,20 @@ export const appRouter = router({
         };
       }),
 
-    // Create a comment (only if user has voted).parentId 为回复目标，无则为主评论
-    create: publicProcedure
+    // 发表评论：当前用户参与过投票方可发表（本设备投过 或 已登录且该用户已收藏）
+    create: protectedProcedure
       .input(z.object({
         cardId: z.number(),
         deviceId: z.string(),
         content: z.string().min(1).max(500),
         parentId: z.number().optional(),
       }))
-      .mutation(async ({ input }) => {
-        const hasVoted = await db.hasVotedOnCard(input.deviceId, input.cardId);
-        if (!hasVoted) {
-          throw new Error("Must vote on this card before commenting");
+      .mutation(async ({ input, ctx }) => {
+        const hasVotedOnDevice = await db.hasVotedOnCard(input.deviceId, input.cardId);
+        const hasFavoritedByUser = await db.isFavoritedByUserId(ctx.user.id, input.cardId);
+        const currentUserHasVoted = hasVotedOnDevice || hasFavoritedByUser;
+        if (!currentUserHasVoted) {
+          throw new Error("参与投票后可发表评论");
         }
         if (input.parentId != null) {
           const parent = await db.getCommentById(input.parentId);
@@ -342,59 +320,58 @@ export const appRouter = router({
 
   // Favorite operations
   favorites: router({
-    // Toggle favorite (add or remove)
-    toggle: publicProcedure
+    // Toggle favorite (requires login)
+    toggle: protectedProcedure
       .input(z.object({
         cardId: z.number(),
         deviceId: z.string(),
       }))
-      .mutation(async ({ input }) => {
-        // Check if user has voted on this card
+      .mutation(async ({ input, ctx }) => {
         const hasVoted = await db.hasVotedOnCard(input.deviceId, input.cardId);
         if (!hasVoted) {
           throw new Error("Must vote on this card before favoriting");
         }
 
-        // Check if already favorited
-        const isFavorited = await db.isFavorited(input.deviceId, input.cardId);
-        
-        if (isFavorited) {
-          // Remove favorite
-          await db.deleteFavorite(input.deviceId, input.cardId);
+        const isFav = await db.isFavoritedByUserId(ctx.user.id, input.cardId);
+        if (isFav) {
+          await db.deleteFavoriteByUserId(ctx.user.id, input.cardId);
           return { isFavorited: false };
-        } else {
-          // Add favorite
-          await db.createFavorite({
-            cardId: input.cardId,
-            deviceId: input.deviceId,
-          });
-          return { isFavorited: true };
         }
+        await db.createFavorite({
+          cardId: input.cardId,
+          deviceId: input.deviceId,
+          userId: ctx.user.id,
+        });
+        return { isFavorited: true };
       }),
 
-    // Check if card is favorited
+    // Check if card is favorited (by userId when logged in, else deviceId)
     check: publicProcedure
       .input(z.object({
         cardId: z.number(),
         deviceId: z.string(),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        if (ctx.user?.id) {
+          const isFavorited = await db.isFavoritedByUserId(ctx.user.id, input.cardId);
+          return { isFavorited };
+        }
         const isFavorited = await db.isFavorited(input.deviceId, input.cardId);
         return { isFavorited };
       }),
 
-    // Get user's favorites
+    // Get user's favorites (by userId when logged in, else deviceId)
     getMyFavorites: publicProcedure
       .input(z.object({ deviceId: z.string() }))
-      .query(async ({ input }) => {
-        const favoritesList = await db.getFavoritesByDeviceId(input.deviceId);
-        
-        // Get card details for each favorite
+      .query(async ({ input, ctx }) => {
+        const favoritesList = ctx.user?.id
+          ? await db.getFavoritesByUserId(ctx.user.id)
+          : await db.getFavoritesByDeviceId(input.deviceId);
+
         const favoritesWithDetails = await Promise.all(
           favoritesList.map(async (fav) => {
             const card = await db.getCardById(fav.cardId);
             if (!card) return null;
-            
             const photos = await db.getPhotosByCardId(fav.cardId);
             return {
               ...card,
@@ -403,8 +380,6 @@ export const appRouter = router({
             };
           })
         );
-        
-        // Filter out any null results
         return favoritesWithDetails.filter(Boolean);
       }),
   }),
