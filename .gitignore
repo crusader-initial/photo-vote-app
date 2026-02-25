@@ -11,6 +11,7 @@ expo-env.d.ts
 
 # Native
 .kotlin/
+*.orig
 *.orig.*
 *.jks
 *.p8
@@ -46,6 +47,9 @@ app-example
 # IDE
 .vscode/
 .idea/
+*.ipr
+*.iml
+*.iws
 *.swp
 *.swo
 *~
@@ -61,7 +65,22 @@ Thumbs.db
 *.tgz
 *.tar.gz
 .cache/
+*.cache
+*.diff
+*.patch
+*.tmp
 
 # Uploads (local file storage)
 uploads/*
 !uploads/.gitkeep
+
+# Maven
+target/
+
+# Eclipse
+.settings/
+.project
+.classpath
+
+# CocoaPods
+Pods/
