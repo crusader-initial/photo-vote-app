@@ -2,7 +2,6 @@ import { View, Text, Pressable, StyleSheet, Modal, FlatList, Platform, Alert } f
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { useDeviceId } from "@/hooks/use-device-id";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import { getImageUrl } from "@/lib/utils";
@@ -16,12 +15,11 @@ interface HistoryDrawerProps {
 export function HistoryDrawer({ visible, onClose }: HistoryDrawerProps) {
   const router = useRouter();
   const colors = useColors();
-  const { deviceId } = useDeviceId();
 
   const utils = trpc.useUtils();
   const { data: myCards, isLoading } = trpc.cards.getMyCards.useQuery(
-    { deviceId: deviceId ?? "" },
-    { enabled: !!deviceId && visible }
+    undefined,
+    { enabled: visible }
   );
 
   const deleteCardMutation = trpc.cards.delete.useMutation({
@@ -43,8 +41,7 @@ export function HistoryDrawer({ visible, onClose }: HistoryDrawerProps) {
           text: "删除",
           style: "destructive",
           onPress: () => {
-            if (!deviceId) return;
-            deleteCardMutation.mutate({ cardId, deviceId });
+            deleteCardMutation.mutate({ cardId });
           },
         },
       ]

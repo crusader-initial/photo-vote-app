@@ -2,8 +2,12 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dependencies
-RUN corepack enable
+# Install pnpm using npm with Chinese mirror (avoids TLS issues)
+RUN npm install -g pnpm@9.12.0 --registry=https://registry.npmmirror.com
+
+# Configure pnpm to use Chinese mirror
+RUN pnpm config set registry https://registry.npmmirror.com
+
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 

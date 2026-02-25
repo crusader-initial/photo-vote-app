@@ -6,26 +6,24 @@ import { Image } from "expo-image";
 import { ScreenContainer } from "@/components/screen-container";
 import { ActionButton } from "@/components/action-button";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { useDeviceId } from "@/hooks/use-device-id";
 import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
 import { getImageUrl } from "@/lib/utils";
 
 const SKIP_VOTE_REDIRECT_KEY = "@skip_vote_redirect";
 
-type CommentWithVote = { id: number; deviceId: string; content: string; createdAt: Date; votedPhotoId: number | null; replyCount?: number };
-type ReplyBlock = { replies: CommentWithVote[]; parentDeviceId: string };
+type CommentWithVote = { id: number; userName: string; content: string; createdAt: Date; votedPhotoId: number | null; replyCount?: number };
+type ReplyBlock = { replies: CommentWithVote[]; parentUserName: string };
 
 export default function ResultScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ cardId: string; from?: string }>();
   const cardId = params.cardId ? parseInt(params.cardId, 10) : 0;
   const fromFavorites = params.from === "favorites";
-  const { deviceId } = useDeviceId();
   const { user } = useAuth();
 
   const [commentText, setCommentText] = useState("");
-  const [replyingTo, setReplyingTo] = useState<{ commentId: number; deviceId: string } | null>(null);
+  const [replyingTo, setReplyingTo] = useState<{ commentId: number; userName: string } | null>(null);
   const [expandedReplies, setExpandedReplies] = useState<Record<number, ReplyBlock>>({});
   const [loadingReplies, setLoadingReplies] = useState<Record<number, boolean>>({});
 
@@ -35,13 +33,13 @@ export default function ResultScreen() {
   );
 
   const { data: commentsData, refetch: refetchComments } = trpc.comments.getByCardId.useQuery(
-    { cardId, deviceId: deviceId ?? "" },
-    { enabled: cardId > 0 && !!deviceId }
+    { cardId },
+    { enabled: cardId > 0 && !!user }
   );
 
   const { data: favoriteData } = trpc.favorites.check.useQuery(
-    { cardId, deviceId: deviceId ?? "" },
-    { enabled: cardId > 0 && !!deviceId }
+    { cardId },
+    { enabled: cardId > 0 && !!user }
   );
   const isFavorited = favoriteData?.isFavorited ?? false;
 
@@ -78,7 +76,7 @@ export default function ResultScreen() {
   };
 
   const handleSubmitComment = () => {
-    if (!commentText.trim() || !deviceId || !cardId) return;
+    if (!commentText.trim() || !cardId) return;
     if (!user) {
       if (Platform.OS === "web") window.alert("请先登录后评论");
       else Alert.alert("提示", "请先登录后评论", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
@@ -86,37 +84,36 @@ export default function ResultScreen() {
     }
     createCommentMutation.mutate({
       cardId,
-      deviceId,
       content: commentText.trim(),
       parentId: replyingTo?.commentId,
     });
   };
 
   const handleExpandReplies = useCallback(async (parentId: number) => {
-    if (!deviceId || !cardId || loadingReplies[parentId] || expandedReplies[parentId]) return;
+    if (!cardId || loadingReplies[parentId] || expandedReplies[parentId]) return;
     setLoadingReplies((p) => ({ ...p, [parentId]: true }));
     try {
-      const res = await utils.comments.getReplies.fetch({ parentId, cardId, deviceId });
-      if (res.replies.length > 0 || res.parentDeviceId) {
-        setExpandedReplies((prev) => ({ ...prev, [parentId]: { replies: res.replies, parentDeviceId: res.parentDeviceId ?? "" } }));
+      const res = await utils.comments.getReplies.fetch({ parentId, cardId });
+      if (res.replies.length > 0 || res.parentUserName) {
+        setExpandedReplies((prev) => ({ ...prev, [parentId]: { replies: res.replies as CommentWithVote[], parentUserName: res.parentUserName ?? "" } }));
       }
     } finally {
       setLoadingReplies((p) => ({ ...p, [parentId]: false }));
     }
-  }, [deviceId, cardId, utils.comments.getReplies, loadingReplies, expandedReplies]);
+  }, [cardId, utils.comments.getReplies, loadingReplies, expandedReplies]);
 
-  const handleReplyClick = useCallback((commentId: number, deviceId: string) => {
-    setReplyingTo({ commentId, deviceId });
+  const handleReplyClick = useCallback((commentId: number, userName: string) => {
+    setReplyingTo({ commentId, userName });
   }, []);
 
   const handleToggleFavorite = () => {
-    if (!deviceId || !cardId || toggleFavoriteMutation.isPending) return;
+    if (!cardId || toggleFavoriteMutation.isPending) return;
     if (!user) {
       if (Platform.OS === "web") window.alert("请先登录后收藏");
       else Alert.alert("提示", "请先登录后收藏", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
       return;
     }
-    toggleFavoriteMutation.mutate({ cardId, deviceId });
+    toggleFavoriteMutation.mutate({ cardId });
   };
 
   if (!card) {
@@ -233,7 +230,7 @@ export default function ResultScreen() {
               {/* 评论输入：回复时显示前缀 */}
               {replyingTo && (
                 <View style={styles.replyPrefixRow}>
-                  <Text style={styles.replyPrefixText}>回复 @用户{replyingTo.deviceId.slice(-4)}:</Text>
+                  <Text style={styles.replyPrefixText}>回复 @{replyingTo.userName}:</Text>
                   <Pressable onPress={() => setReplyingTo(null)} hitSlop={8}>
                     <IconSymbol name="xmark" size={16} color="#9CA3AF" />
                   </Pressable>
@@ -290,7 +287,7 @@ export default function ResultScreen() {
                               />
                             ) : (
                               <View style={styles.commentAvatar}>
-                                <Text style={styles.commentAvatarText}>{comment.deviceId.slice(-2)}</Text>
+                                <Text style={styles.commentAvatarText}>{comment.userName.slice(-2)}</Text>
                               </View>
                             )}
                             {votedPhoto && photoIndex >= 0 && (
@@ -301,7 +298,7 @@ export default function ResultScreen() {
                           </View>
                           <View style={styles.commentBody}>
                             <View style={styles.commentRow}>
-                              <Text style={styles.commentUser}>用户 {comment.deviceId.slice(-4)}</Text>
+                              <Text style={styles.commentUser}>{comment.userName}</Text>
                               {votedPhoto && photoIndex >= 0 && (
                                 <View style={styles.voteBadge}>
                                   <IconSymbol name="checkmark.circle.fill" size={12} color="#6366F1" />
@@ -319,7 +316,7 @@ export default function ResultScreen() {
                                   minute: "2-digit",
                                 })}
                               </Text>
-                              <Pressable onPress={() => handleReplyClick(comment.id, comment.deviceId)} style={styles.replyBtn}>
+                              <Pressable onPress={() => handleReplyClick(comment.id, comment.userName)} style={styles.replyBtn}>
                                 <Text style={styles.replyBtnText}>回复</Text>
                               </Pressable>
                             </View>
@@ -340,7 +337,7 @@ export default function ResultScreen() {
                                       <View style={[styles.commentItem, styles.replyItem]}>
                                         <View style={styles.commentBody}>
                                           <View style={styles.commentRow}>
-                                            <Text style={styles.commentUser}>用户 {reply.deviceId.slice(-4)}</Text>
+                                            <Text style={styles.commentUser}>{reply.userName}</Text>
                                             {rPhoto && rIdx >= 0 && (
                                               <View style={styles.voteBadge}>
                                                 <IconSymbol name="checkmark.circle.fill" size={12} color="#6366F1" />
@@ -349,7 +346,7 @@ export default function ResultScreen() {
                                             )}
                                           </View>
                                           <Text style={styles.commentContent}>
-                                            回复 @用户{expanded.parentDeviceId.slice(-4)}: {reply.content}
+                                            回复 @{expanded.parentUserName}: {reply.content}
                                           </Text>
                                           <View style={styles.commentFooter}>
                                             <Text style={styles.commentTime}>
@@ -360,7 +357,7 @@ export default function ResultScreen() {
                                                 minute: "2-digit",
                                               })}
                                             </Text>
-                                            <Pressable onPress={() => handleReplyClick(reply.id, reply.deviceId)} style={styles.replyBtn}>
+                                            <Pressable onPress={() => handleReplyClick(reply.id, reply.userName)} style={styles.replyBtn}>
                                               <Text style={styles.replyBtnText}>回复</Text>
                                             </Pressable>
                                           </View>
@@ -374,7 +371,7 @@ export default function ResultScreen() {
                                                 <View key={sub.id} style={[styles.commentItem, styles.replyItem, styles.replyItemL2]}>
                                                   <View style={styles.commentBody}>
                                                     <Text style={styles.commentContent}>
-                                                      回复 @用户{rExpanded.parentDeviceId.slice(-4)}: {sub.content}
+                                                      回复 @{rExpanded.parentUserName}: {sub.content}
                                                     </Text>
                                                     <View style={styles.commentFooter}>
                                                       <Text style={styles.commentTime}>
@@ -385,7 +382,7 @@ export default function ResultScreen() {
                                                           minute: "2-digit",
                                                         })}
                                                       </Text>
-                                                      <Pressable onPress={() => handleReplyClick(sub.id, sub.deviceId)} style={styles.replyBtn}>
+                                                      <Pressable onPress={() => handleReplyClick(sub.id, sub.userName)} style={styles.replyBtn}>
                                                         <Text style={styles.replyBtnText}>回复</Text>
                                                       </Pressable>
                                                     </View>

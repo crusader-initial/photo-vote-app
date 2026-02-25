@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { useDeviceId } from "@/hooks/use-device-id";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
@@ -14,13 +13,12 @@ import * as Haptics from "expo-haptics";
 export default function FavoritesScreen() {
   const router = useRouter();
   const colors = useColors();
-  const { deviceId } = useDeviceId();
   const { user } = useAuth();
 
   const utils = trpc.useUtils();
   const { data: favorites, isLoading } = trpc.favorites.getMyFavorites.useQuery(
-    { deviceId: deviceId ?? "" },
-    { enabled: !!deviceId }
+    undefined,
+    { enabled: !!user }
   );
 
   const toggleFavoriteMutation = trpc.favorites.toggle.useMutation({
@@ -47,11 +45,11 @@ export default function FavoritesScreen() {
 
   const handleCancelFavorite = (e: any, cardId: number) => {
     e?.stopPropagation?.();
-    if (!user || !deviceId || toggleFavoriteMutation.isPending) return;
+    if (!user || toggleFavoriteMutation.isPending) return;
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    toggleFavoriteMutation.mutate({ cardId, deviceId });
+    toggleFavoriteMutation.mutate({ cardId });
   };
 
   return (

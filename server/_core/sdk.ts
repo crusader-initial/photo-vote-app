@@ -21,7 +21,7 @@ const isNonEmptyString = (value: unknown): value is string =>
 export type SessionPayload = {
   openId: string;
   appId: string;
-  name: string;
+  name?: string;
 };
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
@@ -180,7 +180,7 @@ class SDKServer {
 
   async verifySession(
     cookieValue: string | undefined | null,
-  ): Promise<{ openId: string; appId: string; name: string } | null> {
+  ): Promise<{ openId: string; appId: string; name?: string } | null> {
     if (!cookieValue) {
       console.warn("[Auth] Missing session cookie");
       return null;
@@ -193,8 +193,8 @@ class SDKServer {
       });
       const { openId, appId, name } = payload as Record<string, unknown>;
 
-      if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
-        console.warn("[Auth] Session payload missing required fields");
+      if (!isNonEmptyString(openId)) {
+        console.warn("[Auth] Session payload missing required field: openId");
         return null;
       }
 

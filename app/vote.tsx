@@ -3,7 +3,6 @@ import { View, Text, Pressable, StyleSheet, Dimensions, Platform, ActivityIndica
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { useDeviceId } from "@/hooks/use-device-id";
 import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
 import { getImageUrl } from "@/lib/utils";
@@ -33,8 +32,7 @@ interface VoteCardData {
 export default function VoteScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { deviceId, loading: deviceLoading } = useDeviceId();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   
   // Current card state
   const [currentCard, setCurrentCard] = useState<VoteCardData | null>(null);
@@ -65,18 +63,17 @@ export default function VoteScreen() {
 
   // 拉取一批卡片（用于初始加载与队列补货）
   const fetchBatch = useCallback(async (excludeCardIds: number[]): Promise<VoteCardData[]> => {
-    if (!deviceId) return [];
+    if (!user) return [];
     const batch = await utils.cards.getRandomForVotingBatch.fetch({
-      deviceId,
       count: PREFETCH_COUNT,
       excludeCardIds: excludeCardIds.length > 0 ? excludeCardIds : undefined,
     });
     return batch as VoteCardData[];
-  }, [deviceId, utils.cards.getRandomForVotingBatch]);
+  }, [user, utils.cards.getRandomForVotingBatch]);
 
   // 初始加载或队列被清空时：拉取一批卡片
   useEffect(() => {
-    if (!deviceId || cardQueue.length > 0 || isTransitioning) return;
+    if (!user || cardQueue.length > 0 || isTransitioning) return;
     setQueueLoading(true);
     const exclude = recentCardIdsRef.current;
     fetchBatch(exclude)
@@ -90,7 +87,7 @@ export default function VoteScreen() {
       .finally(() => {
         setQueueLoading(false);
       });
-  }, [deviceId, cardQueue.length, isTransitioning, fetchBatch]);
+  }, [user, cardQueue.length, isTransitioning, fetchBatch]);
 
   const submitVoteMutation = trpc.votes.submit.useMutation({
     onSuccess: (data) => {
@@ -116,14 +113,14 @@ export default function VoteScreen() {
 
   // Comments queries
   const { data: commentsData, refetch: refetchComments } = trpc.comments.getByCardId.useQuery(
-    { cardId: currentCard?.id ?? 0, deviceId: deviceId ?? "" },
-    { enabled: !!currentCard && !!deviceId && showResult }
+    { cardId: currentCard?.id ?? 0 },
+    { enabled: !!currentCard && !!user && showResult }
   );
 
   // Favorite queries
   const { data: favoriteData, refetch: refetchFavorite } = trpc.favorites.check.useQuery(
-    { cardId: currentCard?.id ?? 0, deviceId: deviceId ?? "" },
-    { enabled: !!currentCard && !!deviceId && showResult }
+    { cardId: currentCard?.id ?? 0 },
+    { enabled: !!currentCard && !!user && showResult }
   );
 
   const toggleFavoriteMutation = trpc.favorites.toggle.useMutation({
@@ -153,7 +150,7 @@ export default function VoteScreen() {
   });
 
   const handleSubmitComment = useCallback(() => {
-    if (!commentText.trim() || !currentCard || !deviceId) return;
+    if (!commentText.trim() || !currentCard) return;
     if (!user) {
       if (Platform.OS === "web") window.alert("请先登录后评论");
       else Alert.alert("提示", "请先登录后评论", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
@@ -161,23 +158,19 @@ export default function VoteScreen() {
     }
     createCommentMutation.mutate({
       cardId: currentCard.id,
-      deviceId,
       content: commentText.trim(),
     });
-  }, [commentText, currentCard, deviceId, createCommentMutation, user, router]);
+  }, [commentText, currentCard, createCommentMutation, user, router]);
 
   const handleToggleFavorite = useCallback(() => {
-    if (!currentCard || !deviceId) return;
+    if (!currentCard) return;
     if (!user) {
       if (Platform.OS === "web") window.alert("请先登录后收藏");
       else Alert.alert("提示", "请先登录后收藏", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
       return;
     }
-    toggleFavoriteMutation.mutate({
-      cardId: currentCard.id,
-      deviceId,
-    });
-  }, [currentCard, deviceId, toggleFavoriteMutation, user, router]);
+    toggleFavoriteMutation.mutate({ cardId: currentCard.id });
+  }, [currentCard, toggleFavoriteMutation, user, router]);
 
   // 预加载当前卡片及队列中所有卡片的图片
   useEffect(() => {
@@ -274,7 +267,7 @@ export default function VoteScreen() {
   }, [previousCards.length, isTransitioning, resetAndShowPrevious]);
 
   const handleSelectPhoto = useCallback((photoId: number) => {
-    if (selectedPhotoId !== null || !deviceId || !currentCard) return;
+    if (selectedPhotoId !== null || !currentCard) return;
     if (!user) {
       if (Platform.OS === "web") window.alert("请先登录后再投票");
       else Alert.alert("提示", "请先登录后再投票", [{ text: "去登录", onPress: () => router.push("/login") }, { text: "取消" }]);
@@ -284,11 +277,10 @@ export default function VoteScreen() {
     setSelectedPhotoId(photoId);
 
     submitVoteMutation.mutate({
-      deviceId,
       cardId: currentCard.id,
       photoId,
     });
-  }, [selectedPhotoId, deviceId, currentCard, submitVoteMutation, user, router]);
+  }, [selectedPhotoId, currentCard, submitVoteMutation, user, router]);
 
   const handleTakeBreak = useCallback(() => {
     AsyncStorage.setItem(SKIP_VOTE_REDIRECT_KEY, "1").catch(console.error);
@@ -333,7 +325,7 @@ export default function VoteScreen() {
   }));
 
   // Loading state
-  if (deviceLoading) {
+  if (authLoading) {
     return (
       <View style={[styles.fullScreen, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color="#6366F1" />
@@ -600,7 +592,7 @@ export default function VoteScreen() {
                             />
                           ) : (
                             <View style={styles.drawerCommentAvatar}>
-                              <Text style={styles.drawerCommentAvatarText}>{comment.deviceId.slice(-2)}</Text>
+                              <Text style={styles.drawerCommentAvatarText}>{comment.userName.slice(-2)}</Text>
                             </View>
                           )}
                           {votedPhoto && photoIndex >= 0 && (
@@ -611,7 +603,7 @@ export default function VoteScreen() {
                         </View>
                         <View style={styles.drawerCommentBody}>
                           <View style={styles.drawerCommentRow}>
-                            <Text style={styles.drawerCommentUser}>用户 {comment.deviceId.slice(-4)}</Text>
+                            <Text style={styles.drawerCommentUser}>{comment.userName}</Text>
                             {votedPhoto && photoIndex >= 0 && (
                               <View style={styles.drawerVoteBadge}>
                                 <IconSymbol name="checkmark.circle.fill" size={12} color="#6366F1" />

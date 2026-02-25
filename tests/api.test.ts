@@ -5,14 +5,12 @@ vi.mock("../server/db", () => ({
   createCard: vi.fn().mockResolvedValue(1),
   getCardById: vi.fn().mockResolvedValue({
     id: 1,
-    deviceId: "test-device-123",
     predictedPhotoIndex: 0,
     totalVotes: 0,
     isCompleted: false,
     createdAt: new Date(),
     updatedAt: new Date(),
   }),
-  getCardsByDeviceId: vi.fn().mockResolvedValue([]),
   updateCardVotes: vi.fn().mockResolvedValue(undefined),
   createPhotos: vi.fn().mockResolvedValue(undefined),
   getPhotosByCardId: vi.fn().mockResolvedValue([
@@ -24,7 +22,6 @@ vi.mock("../server/db", () => ({
   hasVotedOnCard: vi.fn().mockResolvedValue(false),
   getRandomAvailableCard: vi.fn().mockResolvedValue({
     id: 2,
-    deviceId: "other-device",
     predictedPhotoIndex: 1,
     totalVotes: 10,
     isCompleted: false,

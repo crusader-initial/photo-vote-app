@@ -11,12 +11,19 @@ import {
   Modal,
   useWindowDimensions,
 } from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { Image } from "expo-image";
+import * as ImageManipulator from "expo-image-manipulator";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { ScreenContainer } from "@/components/screen-container";
 import { HistoryDrawer } from "@/components/history-drawer";
-import { useDeviceId } from "@/hooks/use-device-id";
+import { FeedbackModal } from "@/components/feedback-modal";
 import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
@@ -35,19 +42,296 @@ function displayName(user: { name: string | null; phone: string | null }): strin
   return maskPhone(user.phone);
 }
 
+const OVERLAY_DARK = "rgba(0,0,0,0.68)";
+
+type CropModalProps = {
+  asset: ImagePicker.ImagePickerAsset;
+  tintColor: string;
+  onConfirm: (base64: string, mimeType: string) => void;
+  onCancel: () => void;
+};
+
+function AvatarCropModal({ asset, tintColor, onConfirm, onCancel }: CropModalProps) {
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const circleR = Math.min(screenW * 0.38, 160);
+  const circleD = circleR * 2;
+  const circleCX = screenW / 2;
+  const circleCY = screenH * 0.42;
+
+  // Scale image to at least cover the circle while maintaining aspect ratio
+  const displayScale = Math.max(
+    screenW / asset.width,
+    circleD / asset.height,
+    circleD / asset.width,
+  );
+  const dW = asset.width * displayScale;
+  const dH = asset.height * displayScale;
+
+  // Shared values: translation is relative to the image's centered position
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const scale = useSharedValue(1);
+  // Saved state between gesture sessions
+  const savedTX = useSharedValue(0);
+  const savedTY = useSharedValue(0);
+  const savedScale = useSharedValue(1);
+
+  const [confirming, setConfirming] = useState(false);
+
+  // Minimum scale: image must just cover the circle (can be < 1 if displayScale overshoots)
+  const MIN_SCALE = Math.max(circleD / dW, circleD / dH);
+  const MAX_SCALE = 6;
+
+  // RNGH v2 + Reanimated v4: callbacks auto-workletize when they access shared values.
+  // Do NOT add explicit "worklet" directive — it breaks pinch in arrow functions.
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      savedTX.value = translateX.value;
+      savedTY.value = translateY.value;
+    })
+    .onUpdate((e) => {
+      const s = scale.value;
+      const halfW = (dW * s) / 2;
+      const halfH = (dH * s) / 2;
+      const nx = savedTX.value + e.translationX;
+      const ny = savedTY.value + e.translationY;
+      translateX.value = Math.min(Math.max(nx, -(halfW - circleR)), halfW - circleR);
+      translateY.value = Math.min(Math.max(ny, -(halfH - circleR)), halfH - circleR);
+    });
+
+  const pinchGesture = Gesture.Pinch()
+    .onStart(() => {
+      savedScale.value = scale.value;
+    })
+    .onUpdate((e) => {
+      const newScale = Math.min(Math.max(savedScale.value * e.scale, MIN_SCALE), MAX_SCALE);
+      scale.value = newScale;
+      const halfW = (dW * newScale) / 2;
+      const halfH = (dH * newScale) / 2;
+      translateX.value = Math.min(Math.max(translateX.value, -(halfW - circleR)), halfW - circleR);
+      translateY.value = Math.min(Math.max(translateY.value, -(halfH - circleR)), halfH - circleR);
+    })
+    .onEnd(() => {
+      const s = scale.value;
+      const halfW = (dW * s) / 2;
+      const halfH = (dH * s) / 2;
+      translateX.value = withSpring(Math.min(Math.max(translateX.value, -(halfW - circleR)), halfW - circleR));
+      translateY.value = withSpring(Math.min(Math.max(translateY.value, -(halfH - circleR)), halfH - circleR));
+    });
+
+  const composed = Gesture.Simultaneous(panGesture, pinchGesture);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  const handleConfirm = async () => {
+    setConfirming(true);
+    try {
+      const tx = translateX.value;
+      const ty = translateY.value;
+      const s = scale.value;
+      // Image top-left on screen = (circleCX - dW/2*s + tx, circleCY - dH/2*s + ty)
+      // Circle top-left on screen = (circleCX - circleR, circleCY - circleR)
+      // Crop offset in screen pixels:
+      const cropScreenX = (circleCX - circleR) - (circleCX - dW / 2 * s + tx);
+      const cropScreenY = (circleCY - circleR) - (circleCY - dH / 2 * s + ty);
+      // Convert to original image coordinates
+      const totalScale = displayScale * s;
+      const cropX = cropScreenX / totalScale;
+      const cropY = cropScreenY / totalScale;
+      const cropSize = circleD / totalScale;
+
+      const safeX = Math.max(0, Math.round(cropX));
+      const safeY = Math.max(0, Math.round(cropY));
+      const safeSize = Math.round(
+        Math.min(cropSize, asset.width - safeX, asset.height - safeY),
+      );
+
+      const result = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [
+          { crop: { originX: safeX, originY: safeY, width: safeSize, height: safeSize } },
+          { resize: { width: 400, height: 400 } },
+        ],
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+
+      if (result.base64) {
+        onConfirm(result.base64, "image/jpeg");
+      } else {
+        throw new Error("裁剪结果异常");
+      }
+    } catch (e: any) {
+      Alert.alert("裁剪失败", e?.message ?? "请重试");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
+      {/* GestureHandlerRootView is required inside Modal (separate render tree) */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: "#000" }}>
+
+        {/* Gesture layer: full screen pan + pinch */}
+        <GestureDetector gesture={composed}>
+          <View style={StyleSheet.absoluteFill}>
+            {/* Image centered at (circleCX, circleCY) */}
+            <Animated.View
+              style={[{
+                position: "absolute",
+                top: circleCY - dH / 2,
+                left: circleCX - dW / 2,
+                width: dW,
+                height: dH,
+              }, animatedStyle]}
+            >
+              <Image
+                source={{ uri: asset.uri }}
+                style={{ width: dW, height: dH }}
+                contentFit="fill"
+              />
+            </Animated.View>
+          </View>
+        </GestureDetector>
+
+        {/* Dark overlay panels forming circular hole — pointer-events none so gestures pass through */}
+        <View pointerEvents="none" style={[cropStyles.overlayPanel, { top: 0, left: 0, right: 0, height: circleCY - circleR }]} />
+        <View pointerEvents="none" style={[cropStyles.overlayPanel, { top: circleCY + circleR, left: 0, right: 0, bottom: 0 }]} />
+        <View pointerEvents="none" style={[cropStyles.overlayPanel, { top: circleCY - circleR, left: 0, width: circleCX - circleR, height: circleD }]} />
+        <View pointerEvents="none" style={[cropStyles.overlayPanel, { top: circleCY - circleR, left: circleCX + circleR, right: 0, height: circleD }]} />
+
+        {/* Circle border ring */}
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: circleCY - circleR,
+            left: circleCX - circleR,
+            width: circleD,
+            height: circleD,
+            borderRadius: circleR,
+            borderWidth: 2.5,
+            borderColor: "#fff",
+          }}
+        />
+
+        {/* Top bar */}
+        <View pointerEvents="none" style={cropStyles.topBar}>
+          <Text style={cropStyles.topTitle}>更换头像</Text>
+        </View>
+
+        {/* Hint below circle */}
+        <View
+          pointerEvents="none"
+          style={{ position: "absolute", top: circleCY + circleR + 18, left: 0, right: 0, alignItems: "center" }}
+        >
+          <Text style={cropStyles.hintText}>双指缩放 · 拖动调整位置</Text>
+        </View>
+
+        {/* Action buttons */}
+        <View style={cropStyles.btnRow}>
+          <Pressable onPress={onCancel} disabled={confirming} style={{ flex: 1 }}>
+            {({ pressed }) => (
+              <View style={[cropStyles.cancelBtn, pressed && { opacity: 0.7 }]}>
+                <Text style={cropStyles.cancelBtnText}>取消</Text>
+              </View>
+            )}
+          </Pressable>
+          <Pressable onPress={handleConfirm} disabled={confirming} style={{ flex: 2 }}>
+            {({ pressed }) => (
+              <View style={[cropStyles.confirmBtn, { backgroundColor: tintColor }, pressed && { opacity: 0.85 }, confirming && { opacity: 0.7 }]}>
+                {confirming ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={cropStyles.confirmBtnText}>使用此头像</Text>
+                )}
+              </View>
+            )}
+          </Pressable>
+        </View>
+      </View>
+      </GestureHandlerRootView>
+    </Modal>
+  );
+}
+
+const cropStyles = StyleSheet.create({
+  overlayPanel: {
+    position: "absolute",
+    backgroundColor: OVERLAY_DARK,
+  },
+  topBar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 56,
+    paddingBottom: 16,
+    alignItems: "center",
+  },
+  topTitle: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  hintText: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 13,
+  },
+  btnRow: {
+    position: "absolute",
+    bottom: 48,
+    left: 24,
+    right: 24,
+    flexDirection: "row",
+    gap: 12,
+  },
+  cancelBtn: {
+    borderRadius: 999,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.4)",
+  },
+  cancelBtnText: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  confirmBtn: {
+    borderRadius: 999,
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function MeScreen() {
   const router = useRouter();
   const colors = useColors();
-  const { width: screenWidth } = useWindowDimensions();
-  const { deviceId, loading: deviceLoading } = useDeviceId();
-  const { user, refresh, logout } = useAuth();
+  const { user, refresh, logout, loading: authLoading } = useAuth();
   const [showHistory, setShowHistory] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [pendingAsset, setPendingAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
 
   const updateAvatarMutation = trpc.users.updateAvatar.useMutation();
-  const previewSize = Math.min(screenWidth * 0.6, 240);
 
   useFocusEffect(
     useCallback(() => {
@@ -56,8 +340,8 @@ export default function MeScreen() {
   );
 
   const { data: myCards } = trpc.cards.getMyCards.useQuery(
-    { deviceId: deviceId ?? "" },
-    { enabled: !!deviceId && !!user }
+    undefined,
+    { enabled: !!user }
   );
   const pendingCards = myCards?.filter((c) => !c.isCompleted).length ?? 0;
 
@@ -80,58 +364,67 @@ export default function MeScreen() {
     setShowHistory(true);
   };
 
+  const handleFeedbackPress = () => {
+    haptic();
+    setShowFeedback(true);
+  };
+
   const handleAvatarPress = async () => {
     if (!user) return;
     haptic();
-
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert("需要权限", "请允许访问相册以更换头像");
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
-      quality: 0.85,
-      base64: true,
+      quality: 1,
     });
-
     if (result.canceled || !result.assets?.[0]) return;
     setPendingAsset(result.assets[0]);
   };
 
-  const handleConfirmAvatar = async () => {
-    if (!user || !pendingAsset?.base64) return;
-    haptic();
-    const mimeType = pendingAsset.mimeType ?? "image/jpeg";
-    setUploadingAvatar(true);
+  const handleConfirmAvatar = async (base64: string, mimeType: string) => {
+    if (!user) return;
     setPendingAsset(null);
+    setUploadingAvatar(true);
     try {
-      const { avatarUrl } = await updateAvatarMutation.mutateAsync({
-        base64: pendingAsset.base64,
-        mimeType,
-      });
+      const { avatarUrl } = await updateAvatarMutation.mutateAsync({ base64, mimeType });
       const updatedUser: Auth.User = { ...user, avatarUrl };
       await Auth.setUserInfo(updatedUser);
       await refresh();
     } catch (e: any) {
-      Alert.alert("上传失败", e?.message || "头像更换失败，请重试");
+      Alert.alert("上传失败", e?.message ?? "头像更换失败，请重试");
     } finally {
       setUploadingAvatar(false);
     }
   };
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     haptic();
-    setLoggingOut(true);
-    try {
-      await logout();
-    } finally {
-      setLoggingOut(false);
-    }
+    Alert.alert(
+      "退出登录",
+      "确定要退出登录吗？",
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "退出",
+          style: "destructive",
+          onPress: async () => {
+            setLoggingOut(true);
+            try {
+              await logout();
+            } finally {
+              setLoggingOut(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
-  if (deviceLoading) {
+  if (authLoading) {
     return (
       <ScreenContainer
         className="flex-1 items-center justify-center"
@@ -212,7 +505,7 @@ export default function MeScreen() {
             )}
             <View style={[styles.avatarEditBadge, { backgroundColor: colors.tint }]}>
               {uploadingAvatar ? (
-                <ActivityIndicator size="small" color="#fff" style={{ transform: [{ scale: 0.6 }] }} />
+                <ActivityIndicator size="small" color="#fff" style={{ transform: [{ scale: 0.55 }] }} />
               ) : (
                 <IconSymbol name="camera.fill" size={10} color="#fff" />
               )}
@@ -269,6 +562,25 @@ export default function MeScreen() {
               </View>
             )}
           </Pressable>
+
+          <Pressable onPress={handleFeedbackPress}>
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.menuRow,
+                  styles.cardShadow,
+                  { backgroundColor: colors.background, borderColor: colors.border },
+                  pressed && styles.menuRowPressed,
+                ]}
+              >
+                <View style={[styles.menuIconWrap, { backgroundColor: "#FEF9C3" }]}>
+                  <IconSymbol name="lightbulb.fill" size={20} color="#EAB308" />
+                </View>
+                <Text style={[styles.menuLabel, { color: colors.text }]}>意见反馈</Text>
+                <IconSymbol name="chevron.right" size={18} color={colors.muted} />
+              </View>
+            )}
+          </Pressable>
         </View>
 
         <Pressable onPress={handleLogout} disabled={loggingOut}>
@@ -296,50 +608,16 @@ export default function MeScreen() {
       </ScrollView>
 
       <HistoryDrawer visible={showHistory} onClose={() => setShowHistory(false)} />
+      <FeedbackModal visible={showFeedback} onClose={() => setShowFeedback(false)} />
 
-      {/* Avatar preview modal */}
-      <Modal
-        visible={!!pendingAsset}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPendingAsset(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.background }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>更换头像</Text>
-            <Text style={[styles.modalSub, { color: colors.muted }]}>将使用以下图片作为头像</Text>
-
-            {/* Circular preview */}
-            <View style={[styles.previewRing, { borderColor: colors.tint, width: previewSize + 8, height: previewSize + 8, borderRadius: (previewSize + 8) / 2 }]}>
-              {pendingAsset && (
-                <Image
-                  source={{ uri: pendingAsset.uri }}
-                  style={{ width: previewSize, height: previewSize, borderRadius: previewSize / 2 }}
-                  contentFit="cover"
-                />
-              )}
-            </View>
-
-            {/* Action buttons */}
-            <Pressable onPress={handleConfirmAvatar}>
-              {({ pressed }) => (
-                <View style={[styles.confirmBtn, { backgroundColor: colors.tint }, pressed && styles.btnPressed]}>
-                  <IconSymbol name="checkmark" size={16} color="#fff" />
-                  <Text style={styles.confirmBtnText}>使用此头像</Text>
-                </View>
-              )}
-            </Pressable>
-
-            <Pressable onPress={() => setPendingAsset(null)}>
-              {({ pressed }) => (
-                <View style={[styles.cancelBtn, { borderColor: colors.border }, pressed && styles.btnPressed]}>
-                  <Text style={[styles.cancelBtnText, { color: colors.muted }]}>取消</Text>
-                </View>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      {pendingAsset && (
+        <AvatarCropModal
+          asset={pendingAsset}
+          tintColor={colors.tint}
+          onConfirm={handleConfirmAvatar}
+          onCancel={() => setPendingAsset(null)}
+        />
+      )}
     </ScreenContainer>
   );
 }
@@ -538,69 +816,5 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-  },
-  modalCard: {
-    width: "100%",
-    borderRadius: 24,
-    paddingVertical: 32,
-    paddingHorizontal: 24,
-    alignItems: "center",
-    gap: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-  },
-  modalSub: {
-    fontSize: 13,
-    marginTop: -8,
-  },
-  previewRing: {
-    borderWidth: 3,
-    alignItems: "center",
-    justifyContent: "center",
-    marginVertical: 8,
-  },
-  confirmBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    width: "100%",
-    paddingVertical: 16,
-    borderRadius: 999,
-    marginTop: 4,
-  },
-  confirmBtnText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  cancelBtn: {
-    width: "100%",
-    paddingVertical: 14,
-    borderRadius: 999,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cancelBtnText: {
-    fontSize: 15,
-    fontWeight: "500",
-  },
-  btnPressed: {
-    opacity: 0.8,
   },
 });

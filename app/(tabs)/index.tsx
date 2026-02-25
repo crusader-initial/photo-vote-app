@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from
 import { useRouter, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ScreenContainer } from "@/components/screen-container";
-import { useDeviceId } from "@/hooks/use-device-id";
+import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import * as Haptics from "expo-haptics";
@@ -14,11 +14,11 @@ const SKIP_VOTE_REDIRECT_KEY = "@skip_vote_redirect";
 export default function HomeScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ from?: string }>();
-  const { deviceId, loading: deviceLoading } = useDeviceId();
+  const { loading: authLoading } = useAuth();
 
   // Auto redirect to vote page only on first load (not when coming from vote/waiting/result)
   useEffect(() => {
-    if (deviceLoading) return;
+    if (authLoading) return;
 
     const checkAndRedirect = async () => {
       const skipRedirect = await AsyncStorage.getItem(SKIP_VOTE_REDIRECT_KEY);
@@ -32,7 +32,7 @@ export default function HomeScreen() {
     };
 
     checkAndRedirect();
-  }, [deviceLoading, params.from, router]);
+  }, [authLoading, params.from, router]);
 
   const handleUpload = () => {
     if (Platform.OS !== "web") {
@@ -48,7 +48,7 @@ export default function HomeScreen() {
     router.push("/vote");
   };
 
-  if (deviceLoading) {
+  if (authLoading) {
     return (
       <ScreenContainer className="flex-1 items-center justify-center" style={styles.fill}>
         <ActivityIndicator size="large" color="#6366F1" />

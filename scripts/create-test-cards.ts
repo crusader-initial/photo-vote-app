@@ -4,17 +4,15 @@ import { createCard, createPhotos } from "../server/db";
 async function createTestCards() {
   console.log("Creating test cards...");
 
-  // Create 5 test cards with different device IDs
+  // Create 5 test cards
   for (let i = 0; i < 5; i++) {
-    const deviceId = `test_device_${i}`;
     const predictedPhotoIndex = Math.floor(Math.random() * 3);
     
     const cardId = await createCard({
-      deviceId,
       predictedPhotoIndex,
     });
 
-    console.log(`Created card ${cardId} for device ${deviceId}`);
+    console.log(`Created card ${cardId}`);
 
     // Create 3-4 photos for each card with placeholder URLs
     const photoCount = 3 + Math.floor(Math.random() * 2);

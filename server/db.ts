@@ -1,6 +1,6 @@
 import { eq, and, sql, desc, notInArray, isNull, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, cards, photos, votes, comments, favorites, InsertCard, InsertPhoto, InsertVote, InsertComment, InsertFavorite, Card, Photo, Comment } from "../drizzle/schema";
+import { InsertUser, users, cards, photos, votes, comments, favorites, feedbacks, InsertCard, InsertPhoto, InsertVote, InsertComment, InsertFavorite, InsertFeedback, Card, Photo, Comment } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -161,11 +161,11 @@ export async function getCardById(cardId: number): Promise<Card | undefined> {
   return result[0];
 }
 
-export async function getCardsByDeviceId(deviceId: string): Promise<Card[]> {
+export async function getCardsByUserId(userId: number): Promise<Card[]> {
   const db = await getDb();
   if (!db) return [];
   
-  return db.select().from(cards).where(eq(cards.deviceId, deviceId));
+  return db.select().from(cards).where(eq(cards.userId, userId)).orderBy(desc(cards.createdAt));
 }
 
 export async function updateCardVotes(cardId: number, totalVotes: number, isCompleted: boolean): Promise<void> {
@@ -175,13 +175,13 @@ export async function updateCardVotes(cardId: number, totalVotes: number, isComp
   await db.update(cards).set({ totalVotes, isCompleted }).where(eq(cards.id, cardId));
 }
 
-/** Delete a card and all related data. Only allowed for card owner (deviceId). */
-export async function deleteCard(cardId: number, deviceId: string): Promise<boolean> {
+/** Delete a card and all related data. Only allowed for card owner (userId). */
+export async function deleteCard(cardId: number, userId: number): Promise<boolean> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
   const card = await getCardById(cardId);
-  if (!card || card.deviceId !== deviceId) return false;
+  if (!card || card.userId !== userId) return false;
 
   await db.delete(votes).where(eq(votes.cardId, cardId));
   await db.delete(comments).where(eq(comments.cardId, cardId));
@@ -224,32 +224,33 @@ export async function createVote(data: InsertVote): Promise<number> {
   return Number(result[0].insertId);
 }
 
-export async function hasVotedOnCard(deviceId: string, cardId: number): Promise<boolean> {
+export async function hasVotedOnCard(userId: number, cardId: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
   
   const result = await db.select().from(votes)
-    .where(and(eq(votes.deviceId, deviceId), eq(votes.cardId, cardId)))
+    .where(and(eq(votes.userId, userId), eq(votes.cardId, cardId)))
     .limit(1);
   
   return result.length > 0;
 }
 
-export async function getRandomAvailableCard(deviceId: string): Promise<Card | undefined> {
+export async function getRandomAvailableCard(userId?: number): Promise<Card | undefined> {
   const db = await getDb();
   if (!db) return undefined;
 
-  const votedRows = await db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.deviceId, deviceId));
-  const votedCardIds = votedRows.map((r) => r.cardId);
-
   const isDevelopment = process.env.NODE_ENV === "development";
-
   const conditions = [eq(cards.isCompleted, false)];
-  if (votedCardIds.length > 0) {
-    conditions.push(notInArray(cards.id, votedCardIds));
-  }
-  if (!isDevelopment) {
-    conditions.push(sql`${cards.deviceId} != ${deviceId}`);
+
+  if (userId != null) {
+    const votedRows = await db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.userId, userId));
+    const votedCardIds = votedRows.map((r) => r.cardId);
+    if (votedCardIds.length > 0) {
+      conditions.push(notInArray(cards.id, votedCardIds));
+    }
+    if (!isDevelopment) {
+      conditions.push(sql`${cards.userId} != ${userId} OR ${cards.userId} IS NULL`);
+    }
   }
 
   const result = await db
@@ -264,25 +265,28 @@ export async function getRandomAvailableCard(deviceId: string): Promise<Card | u
 
 /** Get multiple random cards for voting (for preloading). Excludes voted + optional ids. */
 export async function getRandomAvailableCards(
-  deviceId: string,
   limit: number,
-  excludeCardIds: number[] = []
+  excludeCardIds: number[] = [],
+  userId?: number
 ): Promise<Card[]> {
   const db = await getDb();
   if (!db) return [];
 
-  const votedRows = await db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.deviceId, deviceId));
-  const votedCardIds = votedRows.map((r) => r.cardId);
-  const excludeIds = [...new Set([...votedCardIds, ...excludeCardIds])];
-
   const isDevelopment = process.env.NODE_ENV === "development";
-
   const conditions = [eq(cards.isCompleted, false)];
-  if (excludeIds.length > 0) {
-    conditions.push(notInArray(cards.id, excludeIds));
-  }
-  if (!isDevelopment) {
-    conditions.push(sql`${cards.deviceId} != ${deviceId}`);
+
+  if (userId != null) {
+    const votedRows = await db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.userId, userId));
+    const votedCardIds = votedRows.map((r) => r.cardId);
+    const excludeIds = [...new Set([...votedCardIds, ...excludeCardIds])];
+    if (excludeIds.length > 0) {
+      conditions.push(notInArray(cards.id, excludeIds));
+    }
+    if (!isDevelopment) {
+      conditions.push(sql`${cards.userId} != ${userId} OR ${cards.userId} IS NULL`);
+    }
+  } else if (excludeCardIds.length > 0) {
+    conditions.push(notInArray(cards.id, excludeCardIds));
   }
 
   const result = await db
@@ -297,6 +301,17 @@ export async function getRandomAvailableCards(
 
 // ==================== Comment Operations ====================
 
+/** Build a display name for a commenter. Prefers real name, then masked phone, then generic fallback. */
+function buildUserName(user: { name: string | null; phone: string | null } | null | undefined): string {
+  if (user?.name?.trim()) return user.name.trim();
+  if (user?.phone) {
+    const p = user.phone;
+    if (p.length >= 11) return `${p.slice(0, 3)}****${p.slice(7)}`;
+    return p;
+  }
+  return "用户";
+}
+
 export async function createComment(data: InsertComment): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -306,7 +321,7 @@ export async function createComment(data: InsertComment): Promise<number> {
 }
 
 /** 主评论列表（仅 parentId 为 null），按热度（回复数）+ 时间排序 */
-export async function getTopLevelCommentsByCardId(cardId: number): Promise<(Comment & { replyCount: number })[]> {
+export async function getTopLevelCommentsByCardId(cardId: number): Promise<(Comment & { replyCount: number; userName: string })[]> {
   const db = await getDb();
   if (!db) return [];
 
@@ -342,11 +357,23 @@ export async function getTopLevelCommentsByCardId(cardId: number): Promise<(Comm
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
-  return withCount;
+  // Batch-fetch user info for display names
+  const userIds = [...new Set(withCount.filter((c) => c.userId != null).map((c) => c.userId as number))];
+  const userMap = new Map<number, { name: string | null; phone: string | null }>();
+  if (userIds.length > 0) {
+    const userRows = await db.select({ id: users.id, name: users.name, phone: users.phone })
+      .from(users).where(inArray(users.id, userIds));
+    userRows.forEach((u) => userMap.set(u.id, { name: u.name, phone: u.phone }));
+  }
+
+  return withCount.map((c) => ({
+    ...c,
+    userName: buildUserName(c.userId != null ? userMap.get(c.userId) : null),
+  }));
 }
 
 /** 某条评论下的直接回复（楼中楼），按时间正序 */
-export async function getRepliesByParentId(parentId: number): Promise<(Comment & { replyCount: number })[]> {
+export async function getRepliesByParentId(parentId: number): Promise<(Comment & { replyCount: number; userName: string })[]> {
   const db = await getDb();
   if (!db) return [];
 
@@ -370,9 +397,19 @@ export async function getRepliesByParentId(parentId: number): Promise<(Comment &
     if (r.parentId != null) countMap.set(r.parentId, Number(r.replyCount));
   });
 
+  // Batch-fetch user info for display names
+  const userIds = [...new Set(replies.filter((c) => c.userId != null).map((c) => c.userId as number))];
+  const userMap = new Map<number, { name: string | null; phone: string | null }>();
+  if (userIds.length > 0) {
+    const userRows = await db.select({ id: users.id, name: users.name, phone: users.phone })
+      .from(users).where(inArray(users.id, userIds));
+    userRows.forEach((u) => userMap.set(u.id, { name: u.name, phone: u.phone }));
+  }
+
   return replies.map((c) => ({
     ...c,
     replyCount: countMap.get(c.id) ?? 0,
+    userName: buildUserName(c.userId != null ? userMap.get(c.userId) : null),
   }));
 }
 
@@ -404,12 +441,12 @@ export async function getCommentsCount(cardId: number): Promise<number> {
   return result[0]?.count ?? 0;
 }
 
-export async function getVoteByDeviceAndCard(deviceId: string, cardId: number) {
+export async function getVoteByUserAndCard(userId: number, cardId: number) {
   const db = await getDb();
   if (!db) return null;
   
   const result = await db.select().from(votes)
-    .where(and(eq(votes.deviceId, deviceId), eq(votes.cardId, cardId)))
+    .where(and(eq(votes.userId, userId), eq(votes.cardId, cardId)))
     .limit(1);
   
   return result[0] ?? null;
@@ -425,27 +462,11 @@ export async function createFavorite(data: InsertFavorite): Promise<number> {
   return Number(result[0].insertId);
 }
 
-export async function deleteFavorite(deviceId: string, cardId: number): Promise<void> {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  await db.delete(favorites)
-    .where(and(eq(favorites.deviceId, deviceId), eq(favorites.cardId, cardId)));
-}
-
 export async function deleteFavoriteByUserId(userId: number, cardId: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.delete(favorites)
     .where(and(eq(favorites.userId, userId), eq(favorites.cardId, cardId)));
-}
-
-export async function isFavorited(deviceId: string, cardId: number): Promise<boolean> {
-  const db = await getDb();
-  if (!db) return false;
-  const result = await db.select().from(favorites)
-    .where(and(eq(favorites.deviceId, deviceId), eq(favorites.cardId, cardId)))
-    .limit(1);
-  return result.length > 0;
 }
 
 export async function isFavoritedByUserId(userId: number, cardId: number): Promise<boolean> {
@@ -455,19 +476,6 @@ export async function isFavoritedByUserId(userId: number, cardId: number): Promi
     .where(and(eq(favorites.userId, userId), eq(favorites.cardId, cardId)))
     .limit(1);
   return result.length > 0;
-}
-
-export async function getFavoritesByDeviceId(deviceId: string): Promise<{ cardId: number; createdAt: Date }[]> {
-  const db = await getDb();
-  if (!db) return [];
-  const result = await db.select({
-    cardId: favorites.cardId,
-    createdAt: favorites.createdAt,
-  })
-    .from(favorites)
-    .where(eq(favorites.deviceId, deviceId))
-    .orderBy(desc(favorites.createdAt));
-  return result;
 }
 
 export async function getFavoritesByUserId(userId: number): Promise<{ cardId: number; createdAt: Date }[]> {
@@ -481,4 +489,13 @@ export async function getFavoritesByUserId(userId: number): Promise<{ cardId: nu
     .where(eq(favorites.userId, userId))
     .orderBy(desc(favorites.createdAt));
   return result;
+}
+
+// ==================== Feedback Operations ====================
+
+export async function createFeedback(data: InsertFeedback): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(feedbacks).values(data);
+  return Number(result[0].insertId);
 }

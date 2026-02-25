@@ -5,57 +5,8 @@
     {
       "idx": 0,
       "version": "5",
-      "when": 1763372440610,
-      "tag": "0000_elite_eternals",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1770021122273,
-      "tag": "0001_third_living_mummy",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1770087397063,
-      "tag": "0002_steady_venus",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1770088485426,
-      "tag": "0003_skinny_crystal",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1770100000000,
-      "tag": "0004_comments_parent",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "5",
-      "when": 1770200000000,
-      "tag": "0005_phone_login",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "5",
-      "when": 1770300000000,
-      "tag": "0006_hermit_user_uuid",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "5",
-      "when": 1770400000000,
-      "tag": "0007_user_avatar",
+      "when": 1740441600000,
+      "tag": "0000_baseline",
       "breakpoints": true
     }
   ]

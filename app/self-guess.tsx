@@ -14,7 +14,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ScreenContainer } from "@/components/screen-container";
 import { ActionButton } from "@/components/action-button";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { useDeviceId } from "@/hooks/use-device-id";
 import { trpc } from "@/lib/trpc";
 import { getTempPhotos, clearTempPhotos } from "@/lib/temp-photos-store";
 
@@ -28,7 +27,6 @@ interface PhotoData {
 
 export default function SelfGuessScreen() {
   const router = useRouter();
-  const { deviceId, loading: deviceIdLoading } = useDeviceId();
   const [photos, setPhotos] = useState<PhotoData[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,13 +102,6 @@ export default function SelfGuessScreen() {
       return;
     }
 
-    if (!deviceId) {
-      const msg = "设备ID未初始化，请稍候再试";
-      if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("错误", msg);
-      return;
-    }
-
     if (photos.length < 2) {
       const msg = "照片数据异常，请返回重新选择";
       if (Platform.OS === "web") window.alert(msg);
@@ -119,7 +110,6 @@ export default function SelfGuessScreen() {
     }
 
     createCardMutation.mutate({
-      deviceId,
       predictedPhotoIndex: selectedIndex,
       photos: photos.map((p) => ({
         base64: p.base64,
@@ -135,8 +125,8 @@ export default function SelfGuessScreen() {
   };
 
   const canConfirm = useMemo(() => {
-    return selectedIndex !== null && !!deviceId && photos.length >= 2 && !deviceIdLoading;
-  }, [selectedIndex, deviceId, photos.length, deviceIdLoading]);
+    return selectedIndex !== null && photos.length >= 2;
+  }, [selectedIndex, photos.length]);
 
   if (loading) {
     return (
@@ -211,7 +201,6 @@ export default function SelfGuessScreen() {
           <Text style={styles.hintText}>
             {selectedIndex !== null ? `已选择第 ${selectedIndex + 1} 张照片` : "点击选择一张照片"}
           </Text>
-          {deviceIdLoading && <Text style={styles.hintText}>正在准备...</Text>}
           <ActionButton
             title="确认创建"
             onPress={handleConfirm}

@@ -224,7 +224,8 @@ export function registerOAuthRoutes(app: Express) {
       res.json({ user: buildUserResponse(user), token: sessionToken });
     } catch (error) {
       console.error("[Auth] phone-login failed:", error);
-      res.status(500).json({ error: "登录失败" });
+      const message = error instanceof Error ? error.message : "登录失败";
+      res.status(500).json({ error: message });
     }
   });
 
@@ -262,7 +263,8 @@ export function registerOAuthRoutes(app: Express) {
       res.status(201).json({ user: buildUserResponse(user), token: sessionToken });
     } catch (error) {
       console.error("[Auth] phone-register failed:", error);
-      res.status(500).json({ error: "注册失败" });
+      const message = error instanceof Error ? error.message : "注册失败";
+      res.status(500).json({ error: message });
     }
   });
 

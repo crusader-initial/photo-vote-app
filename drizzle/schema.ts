@@ -38,8 +38,8 @@ export type InsertUser = typeof users.$inferInsert;
  */
 export const cards = mysqlTable("cards", {
   id: int("id").autoincrement().primaryKey(),
-  /** Device ID of the uploader */
-  deviceId: varchar("deviceId", { length: 64 }).notNull(),
+  /** User ID of the uploader (primary ownership identifier) */
+  userId: int("userId"),
   /** Index of the photo the uploader predicted would be chosen (0-based) */
   predictedPhotoIndex: int("predictedPhotoIndex").notNull(),
   /** Total number of votes collected */
@@ -81,8 +81,8 @@ export const votes = mysqlTable("votes", {
   cardId: int("cardId").notNull(),
   /** Reference to the photo that was chosen */
   photoId: int("photoId").notNull(),
-  /** Device ID of the voter */
-  deviceId: varchar("deviceId", { length: 64 }).notNull(),
+  /** User ID of the voter (primary ownership identifier) */
+  userId: int("userId"),
   /** Date of the vote (for daily limit tracking) */
   voteDate: varchar("voteDate", { length: 10 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -101,8 +101,8 @@ export const comments = mysqlTable("comments", {
   cardId: int("cardId").notNull(),
   /** Parent comment id; null = 主评论，非 null = 回复该条 */
   parentId: int("parentId"),
-  /** Device ID of the commenter */
-  deviceId: varchar("deviceId", { length: 64 }).notNull(),
+  /** User ID of the commenter (primary ownership identifier) */
+  userId: int("userId"),
   /** Comment content */
   content: text("content").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -113,18 +113,34 @@ export type InsertComment = typeof comments.$inferInsert;
 
 /**
  * Favorites table - stores user's favorite cards (only after voting)
- * When user is logged in by phone, userId is set; otherwise deviceId is used.
  */
 export const favorites = mysqlTable("favorites", {
   id: int("id").autoincrement().primaryKey(),
   /** Reference to the card being favorited */
   cardId: int("cardId").notNull(),
-  /** User ID when logged in by phone; null when using deviceId only */
+  /** User ID of the user who favorited */
   userId: int("userId"),
-  /** Device ID of the user who favorited (fallback when not logged in) */
-  deviceId: varchar("deviceId", { length: 64 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export type Favorite = typeof favorites.$inferSelect;
 export type InsertFavorite = typeof favorites.$inferInsert;
+
+/**
+ * Feedbacks table - stores user-submitted feedback and suggestions
+ */
+export const feedbacks = mysqlTable("feedbacks", {
+  id: int("id").autoincrement().primaryKey(),
+  /** User ID of the submitter (null for anonymous) */
+  userId: int("userId"),
+  /** Feedback category */
+  type: mysqlEnum("type", ["bug", "suggestion", "other"]).default("other").notNull(),
+  /** Feedback content */
+  content: text("content").notNull(),
+  /** Optional contact info (email or phone) provided by user */
+  contactInfo: varchar("contactInfo", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Feedback = typeof feedbacks.$inferSelect;
+export type InsertFeedback = typeof feedbacks.$inferInsert;
