@@ -29,7 +29,7 @@ services:
       PORT: "3000"
       DATABASE_URL: "mysql://root:123456@mysql:3306/photo_vote_app"
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       mysql:
         condition: service_healthy

@@ -54,18 +54,25 @@ export const appRouter = router({
           predictedPhotoIndex: input.predictedPhotoIndex,
         });
 
-        const photoRecords = await Promise.all(
-          input.photos.map(async (photo, index) => {
-            const randomSuffix = Math.random().toString(36).substring(2, 10);
-            const extension = photo.mimeType.split("/")[1] || "jpg";
-            const fileKey = `cards/${cardId}/photo-${index}-${randomSuffix}.${extension}`;
-            const buffer = Buffer.from(photo.base64, "base64");
-            const { url } = await storagePut(fileKey, buffer, photo.mimeType);
-            return { cardId, url, photoIndex: index };
-          }),
-        );
+        try {
+          const photoRecords = await Promise.all(
+            input.photos.map(async (photo, index) => {
+              const randomSuffix = Math.random().toString(36).substring(2, 10);
+              const extension = photo.mimeType.split("/")[1] || "jpg";
+              const fileKey = `cards/${cardId}/photo-${index}-${randomSuffix}.${extension}`;
+              const buffer = Buffer.from(photo.base64, "base64");
+              const { url } = await storagePut(fileKey, buffer, photo.mimeType);
+              return { cardId, url, photoIndex: index };
+            }),
+          );
 
-        await db.createPhotos(photoRecords);
+          await db.createPhotos(photoRecords);
+        } catch (err) {
+          // Rollback: delete the card if photo upload or save fails
+          await db.deleteCard(cardId, ctx.user.id);
+          throw err;
+        }
+
         return { cardId };
       }),
 
@@ -113,21 +120,24 @@ export const appRouter = router({
       }),
 
     // Get multiple random cards for preloading (exclude recently shown to avoid repeat)
-    getRandomForVotingBatch: protectedProcedure
+    // Public: unauthenticated users can browse cards (but cannot vote/comment/favorite)
+    getRandomForVotingBatch: publicProcedure
       .input(z.object({
         count: z.number().min(1).max(10),
         excludeCardIds: z.array(z.number()).optional(),
       }))
       .query(async ({ input, ctx }) => {
         const exclude = input.excludeCardIds ?? [];
-        const cards = await db.getRandomAvailableCards(input.count, exclude, ctx.user.id);
+        // Pass userId only when authenticated; unauthenticated users see all cards
+        const cards = await db.getRandomAvailableCards(input.count, exclude, ctx.user?.id);
         const cardsWithPhotos = await Promise.all(
           cards.map(async (card) => {
             const photos = await db.getPhotosByCardId(card.id);
             return { ...card, photos };
           })
         );
-        return cardsWithPhotos;
+        // Filter out cards that have no photos (orphan cards from failed uploads)
+        return cardsWithPhotos.filter((c) => c.photos.length > 0);
       }),
   }),
 
@@ -174,6 +184,7 @@ export const appRouter = router({
           percentage,
           voteCount: votedPhoto?.voteCount ?? 0,
           totalVotes,
+          voteDate: today,
         };
       }),
 
@@ -182,6 +193,35 @@ export const appRouter = router({
       .input(z.object({ cardId: z.number() }))
       .query(async ({ input, ctx }) => {
         return db.hasVotedOnCard(ctx.user.id, input.cardId);
+      }),
+
+    // Get current user's vote result on a card
+    myVoteResult: protectedProcedure
+      .input(z.object({ cardId: z.number() }))
+      .query(async ({ input, ctx }) => {
+        const vote = await db.getVoteByUserAndCard(ctx.user.id, input.cardId);
+        if (!vote) return null;
+
+        const photos = await db.getPhotosByCardId(input.cardId);
+        const totalVotes = photos.reduce((sum, p) => sum + p.voteCount, 0);
+        const votedPhoto = photos.find((p) => p.id === vote.photoId);
+        const voteCount = votedPhoto?.voteCount ?? 0;
+        const percentage = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
+        const photoStats = photos.map((photo) => ({
+          id: photo.id,
+          voteCount: photo.voteCount,
+          percentage: totalVotes > 0 ? Math.round((photo.voteCount / totalVotes) * 100) : 0,
+        }));
+
+        return {
+          photoId: vote.photoId,
+          voteCount,
+          percentage,
+          totalVotes,
+          photoStats,
+          voteDate: vote.voteDate,
+          createdAt: vote.createdAt,
+        };
       }),
   }),
 

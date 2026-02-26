@@ -1,4 +1,4 @@
-import { eq, and, sql, desc, notInArray, isNull, inArray } from "drizzle-orm";
+import { eq, and, or, sql, desc, notInArray, isNull, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, cards, photos, votes, comments, favorites, feedbacks, InsertCard, InsertPhoto, InsertVote, InsertComment, InsertFavorite, InsertFeedback, Card, Photo, Comment } from "../drizzle/schema";
 import { ENV } from "./_core/env";
@@ -203,8 +203,12 @@ export async function createPhotos(data: InsertPhoto[]): Promise<void> {
 export async function getPhotosByCardId(cardId: number): Promise<Photo[]> {
   const db = await getDb();
   if (!db) return [];
-  
-  return db.select().from(photos).where(eq(photos.cardId, cardId));
+
+  return db
+    .select()
+    .from(photos)
+    .where(eq(photos.cardId, cardId))
+    .orderBy(photos.photoIndex);
 }
 
 export async function incrementPhotoVoteCount(photoId: number): Promise<void> {
@@ -239,8 +243,7 @@ export async function getRandomAvailableCard(userId?: number): Promise<Card | un
   const db = await getDb();
   if (!db) return undefined;
 
-  const isDevelopment = process.env.NODE_ENV === "development";
-  const conditions = [eq(cards.isCompleted, false)];
+  const conditions = userId != null ? [eq(cards.isCompleted, false)] : [];
 
   if (userId != null) {
     const votedRows = await db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.userId, userId));
@@ -248,15 +251,14 @@ export async function getRandomAvailableCard(userId?: number): Promise<Card | un
     if (votedCardIds.length > 0) {
       conditions.push(notInArray(cards.id, votedCardIds));
     }
-    if (!isDevelopment) {
-      conditions.push(sql`${cards.userId} != ${userId} OR ${cards.userId} IS NULL`);
-    }
+    // 允许用户刷到自己发布的投票，并可为自己投一票（不排除 cards.userId === userId）
   }
 
-  const result = await db
-    .select()
-    .from(cards)
-    .where(and(...conditions))
+  const baseQuery = db.select().from(cards);
+  const result = await (conditions.length > 0
+    ? baseQuery.where(and(...conditions))
+    : baseQuery
+  )
     .orderBy(sql`RAND()`)
     .limit(1);
 
@@ -266,35 +268,13 @@ export async function getRandomAvailableCard(userId?: number): Promise<Card | un
 /** Get multiple random cards for voting (for preloading). Excludes voted + optional ids. */
 export async function getRandomAvailableCards(
   limit: number,
-  excludeCardIds: number[] = [],
-  userId?: number
+  _excludeCardIds: number[] = [],
+  _userId?: number
 ): Promise<Card[]> {
   const db = await getDb();
   if (!db) return [];
 
-  const isDevelopment = process.env.NODE_ENV === "development";
-  const conditions = [eq(cards.isCompleted, false)];
-
-  if (userId != null) {
-    const votedRows = await db.select({ cardId: votes.cardId }).from(votes).where(eq(votes.userId, userId));
-    const votedCardIds = votedRows.map((r) => r.cardId);
-    const excludeIds = [...new Set([...votedCardIds, ...excludeCardIds])];
-    if (excludeIds.length > 0) {
-      conditions.push(notInArray(cards.id, excludeIds));
-    }
-    if (!isDevelopment) {
-      conditions.push(sql`${cards.userId} != ${userId} OR ${cards.userId} IS NULL`);
-    }
-  } else if (excludeCardIds.length > 0) {
-    conditions.push(notInArray(cards.id, excludeCardIds));
-  }
-
-  const result = await db
-    .select()
-    .from(cards)
-    .where(and(...conditions))
-    .orderBy(sql`RAND()`)
-    .limit(limit);
+  const result = await db.select().from(cards).orderBy(sql`RAND()`).limit(limit);
 
   return result;
 }

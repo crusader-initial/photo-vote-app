@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { View, Text, Pressable, StyleSheet, Dimensions, Platform, ActivityIndicator, TextInput, KeyboardAvoidingView, ScrollView as RNScrollView, Modal, Image as RNImage, Alert } from "react-native";
+import { View, Text, Pressable, StyleSheet, Dimensions, Platform, ActivityIndicator, TextInput, KeyboardAvoidingView, ScrollView as RNScrollView, Modal, Alert, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -13,15 +13,25 @@ import Animated, {
   withSpring,
   runOnJS,
 } from "react-native-reanimated";
-import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, GestureHandlerRootView, ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SWIPE_THRESHOLD = SCREEN_HEIGHT * 0.08; // 8% 屏高，轻滑即可切换
+const SWIPE_VELOCITY = 800;
 const SKIP_VOTE_REDIRECT_KEY = "@skip_vote_redirect";
 const PREFETCH_COUNT = 3; // 预加载卡片数量
 const RECENT_IDS_MAX = 20; // 排除最近展示的卡片 ID 数量，避免马上又出现
+
+/** "YYYY-MM-DD" -> "YYYY年M月D日" */
+function formatVoteDate(voteDate: string): string {
+  const [y, m, d] = voteDate.split("-");
+  if (!y || !m || !d) return voteDate;
+  const month = parseInt(m, 10);
+  const day = parseInt(d, 10);
+  return `${y}年${month}月${day}日`;
+}
 
 interface VoteCardData {
   id: number;
@@ -43,6 +53,7 @@ export default function VoteScreen() {
   const [showResult, setShowResult] = useState(false);
   const [voteResult, setVoteResult] = useState<{ percentage: number; voteCount: number; totalVotes: number } | null>(null);
   const [allPhotoStats, setAllPhotoStats] = useState<{ id: number; percentage: number; voteCount: number }[]>([]);
+  const [userVotedAt, setUserVotedAt] = useState<string | null>(null); // voteDate "YYYY-MM-DD" 用于展示「某年某月某日参与投票」
   const [isTransitioning, setIsTransitioning] = useState(false);
   
   // Comment state
@@ -51,6 +62,11 @@ export default function VoteScreen() {
   
   // Favorite state
   const [isFavorited, setIsFavorited] = useState(false);
+
+  // 全屏展开查看图片：点击某张图后打开，可横滑查看本卡片其他图
+  const [expandedPhotoIndex, setExpandedPhotoIndex] = useState<number | null>(null);
+  const [viewingPhotoIndex, setViewingPhotoIndex] = useState(0);
+  const imageViewerScrollRef = useRef<RNScrollView>(null);
 
   // Navigation history
   const [previousCards, setPreviousCards] = useState<VoteCardData[]>([]);
@@ -62,24 +78,27 @@ export default function VoteScreen() {
   const utils = trpc.useUtils();
 
   // 拉取一批卡片（用于初始加载与队列补货）
+  // 未登录用户也可以浏览卡片，只是不能投票/评论/收藏
   const fetchBatch = useCallback(async (excludeCardIds: number[]): Promise<VoteCardData[]> => {
-    if (!user) return [];
     const batch = await utils.cards.getRandomForVotingBatch.fetch({
       count: PREFETCH_COUNT,
       excludeCardIds: excludeCardIds.length > 0 ? excludeCardIds : undefined,
     });
-    return batch as VoteCardData[];
-  }, [user, utils.cards.getRandomForVotingBatch]);
+    // Only return cards that have at least one photo
+    return (batch as VoteCardData[]).filter((c) => c.photos && c.photos.length > 0);
+  }, [utils.cards.getRandomForVotingBatch]);
 
   // 初始加载或队列被清空时：拉取一批卡片
+  // 等待 auth 完成后再拉取（无论是否登录均可浏览）
   useEffect(() => {
-    if (!user || cardQueue.length > 0 || isTransitioning) return;
+    if (authLoading || cardQueue.length > 0 || isTransitioning) return;
     setQueueLoading(true);
     const exclude = recentCardIdsRef.current;
     fetchBatch(exclude)
       .then((batch) => {
         setCardQueue(batch);
         setCurrentCard(batch[0] ?? null);
+        setPreviousCards([]);
       })
       .catch((e) => {
         console.error("Batch fetch failed:", e);
@@ -87,7 +106,7 @@ export default function VoteScreen() {
       .finally(() => {
         setQueueLoading(false);
       });
-  }, [user, cardQueue.length, isTransitioning, fetchBatch]);
+  }, [authLoading, cardQueue.length, isTransitioning, fetchBatch]);
 
   const submitVoteMutation = trpc.votes.submit.useMutation({
     onSuccess: (data) => {
@@ -102,6 +121,7 @@ export default function VoteScreen() {
         setAllPhotoStats(stats);
       }
       setVoteResult({ percentage: data.percentage, voteCount: data.voteCount, totalVotes: data.totalVotes });
+      setUserVotedAt("voteDate" in data && typeof data.voteDate === "string" ? data.voteDate : null);
       setShowResult(true);
       setShowComments(false); // Reset comments view
     },
@@ -172,25 +192,36 @@ export default function VoteScreen() {
     toggleFavoriteMutation.mutate({ cardId: currentCard.id });
   }, [currentCard, toggleFavoriteMutation, user, router]);
 
+  // 全屏查看打开时滚动到对应索引
+  useEffect(() => {
+    if (expandedPhotoIndex === null || !currentCard?.photos.length) return;
+    const timer = setTimeout(() => {
+      imageViewerScrollRef.current?.scrollTo({
+        x: expandedPhotoIndex * SCREEN_WIDTH,
+        animated: false,
+      });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [expandedPhotoIndex, currentCard?.photos.length]);
+
   // 预加载当前卡片及队列中所有卡片的图片
   useEffect(() => {
     if (Platform.OS === "web") return;
     const toPreload = currentCard ? [currentCard, ...cardQueue] : cardQueue;
-    toPreload.forEach((c) => {
-      c.photos.forEach((photo) => {
-        RNImage.prefetch(getImageUrl(photo.url)).catch(() => {});
-      });
-    });
+    const urls = toPreload.flatMap((c) => c.photos.map((photo) => getImageUrl(photo.url)));
+    if (urls.length > 0) Image.prefetch(urls).catch(() => {});
   }, [currentCard, cardQueue]);
 
   const resetAndFetchNext = useCallback(() => {
     setShowResult(false);
     setVoteResult(null);
+    setUserVotedAt(null);
     setSelectedPhotoId(null);
     setAllPhotoStats([]);
     setShowComments(false);
     setCommentText("");
     setIsFavorited(false);
+    setExpandedPhotoIndex(null);
     translateY.value = 0;
     cardOpacity.value = 1;
     const prevId = currentCard?.id;
@@ -229,11 +260,13 @@ export default function VoteScreen() {
   const resetAndShowPrevious = useCallback(() => {
     setShowResult(false);
     setVoteResult(null);
+    setUserVotedAt(null);
     setSelectedPhotoId(null);
     setAllPhotoStats([]);
     setShowComments(false);
     setCommentText("");
     setIsFavorited(false);
+    setExpandedPhotoIndex(null);
     translateY.value = 0;
     cardOpacity.value = 1;
 
@@ -287,35 +320,53 @@ export default function VoteScreen() {
     router.replace("/");
   }, [router]);
 
-  // Swipe gesture - 上滑上一张，下滑下一张
+  const canGoBack = previousCards.length > 0;
+  const showEmpty = !currentCard && !queueLoading && !isTransitioning;
+  const showLoading = !currentCard && (queueLoading || isTransitioning);
+  const canSwipeNext = !!currentCard && !(showResult && showComments);
+  const canSwipePrev = canGoBack;
+
+  // 手势：从下往上滑 = 下一张（可无限）；从上往下滑 = 上一张（第一张时不能）
+  // 约定：手指向上 → translationY 负；手指向下 → translationY 正
   const swipeGesture = useMemo(() => 
     Gesture.Pan()
       .enabled(true)
       .onUpdate((event) => {
-        translateY.value = event.translationY;
+        // 使用原始方向：上滑为负，下滑为正
+        const dragY = event.translationY;
+        const isUpwardDrag = dragY < 0;
+        const isDownwardDrag = dragY > 0;
+        const allowMove =
+          (isUpwardDrag && canSwipeNext) ||
+          (isDownwardDrag && canSwipePrev);
+        // 不允许的方向完全不跟手，也不产生可见回弹
+        translateY.value = allowMove ? dragY : 0;
       })
       .onEnd((event) => {
-        if (event.translationY <= -SWIPE_THRESHOLD) {
-          // 上滑：查看上一张
+        const dragY = event.translationY;
+        const velocityY = event.velocityY;
+        // 从下往上滑 = 下一张；从上往下滑 = 上一张
+        const fingerUp = dragY <= -SWIPE_THRESHOLD || velocityY <= -SWIPE_VELOCITY;
+        const fingerDown = dragY >= SWIPE_THRESHOLD || velocityY >= SWIPE_VELOCITY;
+        const toNext = fingerUp && canSwipeNext;
+        const toPrev = fingerDown && canSwipePrev;
+        if (toNext) {
+          // 下一张
           translateY.value = withTiming(-SCREEN_HEIGHT, { duration: 200 }, () => {
-            runOnJS(goToPreviousCard)();
-          });
-        } else if (event.translationY >= SWIPE_THRESHOLD) {
-          // 下滑：查看下一张
-          if (showResult && showComments) {
-            // 评论区打开时先保持当前卡片
-            translateY.value = withSpring(0, { damping: 15 });
-            return;
-          }
-          translateY.value = withTiming(SCREEN_HEIGHT, { duration: 200 }, () => {
             runOnJS(goToNextCard)();
           });
+        } else if (toPrev) {
+          // 上一张（第一张时不允许）
+          translateY.value = withTiming(SCREEN_HEIGHT, { duration: 200 }, () => {
+            runOnJS(goToPreviousCard)();
+          });
         } else {
-          translateY.value = withSpring(0, { damping: 15 });
+          // 禁止方向或未达到阈值时直接复位，避免看到回弹动画
+          translateY.value = 0;
         }
       })
       .runOnJS(true),
-    [showResult, showComments, goToNextCard, goToPreviousCard]
+    [canSwipeNext, canSwipePrev, goToNextCard, goToPreviousCard]
   );
 
   // Animated styles
@@ -329,36 +380,6 @@ export default function VoteScreen() {
     return (
       <View style={[styles.fullScreen, { paddingTop: insets.top }]}>
         <ActivityIndicator size="large" color="#6366F1" />
-      </View>
-    );
-  }
-
-  // No cards available
-  if (!currentCard && !queueLoading && !isTransitioning) {
-    return (
-      <View style={[styles.fullScreen, { paddingTop: insets.top }]}>
-        <Pressable onPress={handleTakeBreak} style={styles.restButton}>
-          <IconSymbol name="xmark" size={24} color="#ffffff" />
-        </Pressable>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>暂无可投票的卡片</Text>
-          <Text style={styles.emptySubtitle}>等待更多用户上传照片</Text>
-          <Pressable onPress={handleTakeBreak} style={styles.backHomeButton}>
-            <Text style={styles.backHomeText}>返回首页</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  // Loading next card - keep previous UI visible during transition
-  if (!currentCard && (queueLoading || isTransitioning)) {
-    return (
-      <View style={[styles.fullScreen, { paddingTop: insets.top }]}>
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#6366F1" />
-          <Text style={styles.loadingText}>正在加载...</Text>
-        </View>
       </View>
     );
   }
@@ -379,6 +400,20 @@ export default function VoteScreen() {
           </View>
 
           {/* Main content */}
+          {showLoading ? (
+            <View style={styles.loadingOverlay}>
+              <ActivityIndicator size="large" color="#6366F1" />
+              <Text style={styles.loadingText}>正在加载...</Text>
+            </View>
+          ) : showEmpty ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyTitle}>暂无可投票的卡片</Text>
+              <Text style={styles.emptySubtitle}>等待更多用户上传照片</Text>
+              <Pressable onPress={handleTakeBreak} style={styles.backHomeButton}>
+                <Text style={styles.backHomeText}>返回首页</Text>
+              </Pressable>
+            </View>
+          ) : (
           <View style={styles.content}>
             {!showResult ? (
               // Voting mode
@@ -389,11 +424,15 @@ export default function VoteScreen() {
                     <Text style={styles.loginHintText}>登录后可投票、评论、收藏</Text>
                   </Pressable>
                 )}
-                <View style={styles.photosGrid}>
+                <ScrollView contentContainerStyle={styles.photosGrid} showsVerticalScrollIndicator={false}>
                   {currentCard!.photos.map((photo, index) => (
                     <Pressable
                       key={photo.id}
-                      onPress={() => handleSelectPhoto(photo.id)}
+                      onPress={() => {
+                        if (selectedPhotoId !== null) return;
+                        setViewingPhotoIndex(index);
+                        setExpandedPhotoIndex(index);
+                      }}
                       disabled={selectedPhotoId !== null}
                       style={({ pressed }) => [
                         styles.photoCard,
@@ -402,19 +441,36 @@ export default function VoteScreen() {
                         pressed && styles.photoCardPressed,
                       ]}
                     >
-                      <Image
-                        source={{ uri: getImageUrl(photo.url) }}
-                        style={styles.photoImage}
-                        contentFit="cover"
-                      />
+                      <View
+                        style={[
+                          styles.photoImageWrap,
+                        ]}
+                      >
+                        <Image
+                          source={{ uri: getImageUrl(photo.url) }}
+                          style={styles.photoImage}
+                          contentFit="cover"
+                          onError={() => {
+                            console.warn("[vote] image load failed", {
+                              photoId: photo.id,
+                              url: getImageUrl(photo.url),
+                            });
+                          }}
+                        />
+                      </View>
                     </Pressable>
                   ))}
-                </View>
+                </ScrollView>
               </>
             ) : (
               // Result mode
               <>
                 <Text style={styles.title}>投票结果</Text>
+                {userVotedAt ? (
+                  <Text style={styles.voteDateSubtitle}>
+                    {formatVoteDate(userVotedAt)}参与投票
+                  </Text>
+                ) : null}
                 {showComments ? (
                   <Text style={styles.subtitle}>点击关闭评论区</Text>
                 ) : null}
@@ -511,13 +567,14 @@ export default function VoteScreen() {
                 {/* Swipe hint removed */}
               </>
             )}
-          </View>
+          </View>          )}
+
         </Animated.View>
       </GestureDetector>
       
       {/* 评论区抽屉 - 从底部弹出，关闭后才能上滑下一张 */}
       <Modal
-        visible={showComments && !!(commentsData?.canView)}
+        visible={!!currentCard && showComments && !!(commentsData?.canView)}
         transparent
         animationType="slide"
         onRequestClose={() => setShowComments(false)}
@@ -630,6 +687,62 @@ export default function VoteScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* 全屏展开查看：横滑可查看本卡片其他图片，选择这张可投票 */}
+      <Modal
+        visible={expandedPhotoIndex !== null && !!currentCard}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setExpandedPhotoIndex(null)}
+      >
+        <View style={[styles.imageViewerOverlay, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+          <View style={styles.imageViewerHeader}>
+            <Pressable onPress={() => setExpandedPhotoIndex(null)} style={styles.imageViewerCloseBtn} hitSlop={12}>
+              <IconSymbol name="xmark.circle.fill" size={32} color="rgba(255,255,255,0.9)" />
+            </Pressable>
+            <Text style={styles.imageViewerCounter}>
+              {viewingPhotoIndex + 1} / {currentCard?.photos.length ?? 0}
+            </Text>
+            <Pressable
+              onPress={() => {
+                if (!currentCard || selectedPhotoId !== null) return;
+                const photo = currentCard.photos[viewingPhotoIndex];
+                if (photo) {
+                  handleSelectPhoto(photo.id);
+                  setExpandedPhotoIndex(null);
+                }
+              }}
+              disabled={selectedPhotoId !== null}
+              style={[styles.imageViewerVoteBtn, selectedPhotoId !== null && styles.imageViewerVoteBtnDisabled]}
+            >
+              <Text style={styles.imageViewerVoteBtnText}>选择这张</Text>
+            </Pressable>
+          </View>
+          <GHScrollView
+            ref={imageViewerScrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            style={styles.imageViewerScroll}
+            contentContainerStyle={styles.imageViewerScrollContent}
+            onMomentumScrollEnd={(e) => {
+              const index = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+              setViewingPhotoIndex(Math.min(Math.max(0, index), (currentCard?.photos.length ?? 1) - 1));
+            }}
+            scrollEventThrottle={16}
+          >
+            {(currentCard?.photos ?? []).map((item) => (
+              <View key={item.id} style={styles.imageViewerPage}>
+                <Image
+                  source={{ uri: getImageUrl(item.url) }}
+                  style={styles.imageViewerImage}
+                  contentFit="contain"
+                />
+              </View>
+            ))}
+          </GHScrollView>
+        </View>
+      </Modal>
     </GestureHandlerRootView>
   );
 }
@@ -724,6 +837,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 8,
   },
+  voteDateSubtitle: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.65)",
+    textAlign: "center",
+    marginTop: -20,
+    marginBottom: 0,
+  },
   subtitle: {
     fontSize: 14,
     color: "rgba(255,255,255,0.6)",
@@ -740,30 +860,37 @@ const styles = StyleSheet.create({
     textDecorationLine: "underline",
   },
   photosGrid: {
-    flex: 1,
+    paddingBottom: 24,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 12,
-    justifyContent: "center",
-    alignContent: "center",
   },
   photoCard: {
-    width: "47%",
-    aspectRatio: 1,
-    borderRadius: 20,
+    width: "48%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 0,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    height: 180,
     overflow: "hidden",
-    backgroundColor: "#2a2a3e",
   },
   photoCardLarge: {
-    width: "65%",
-    aspectRatio: 1,
+    width: "100%",
+    height: 260,
   },
   photoCardFull: {
-    width: "65%",
+    width: "100%",
+    height: 220,
   },
   photoCardPressed: {
     opacity: 0.8,
     transform: [{ scale: 0.97 }],
+  },
+  photoImageWrap: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#E2E8F0",
   },
   photoImage: {
     width: "100%",
@@ -808,7 +935,7 @@ const styles = StyleSheet.create({
   },
   uploadOrderText: {
     fontSize: 12,
-    color: "rgba(255,255,255,0.6)",
+    color: "#64748B",
   },
   yourChoiceBadge: {
     backgroundColor: "#6366F1",
@@ -823,7 +950,7 @@ const styles = StyleSheet.create({
   },
   resultVotes: {
     fontSize: 14,
-    color: "rgba(255,255,255,0.6)",
+    color: "#64748B",
     marginTop: 2,
     marginBottom: 8,
   },
@@ -860,7 +987,7 @@ const styles = StyleSheet.create({
   },
   emptySubtitle: {
     fontSize: 14,
-    color: "rgba(255,255,255,0.6)",
+    color: "#64748B",
     marginBottom: 20,
   },
   backHomeButton: {
@@ -887,7 +1014,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     backgroundColor: "rgba(99, 102, 241, 0.2)",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 24,
     borderWidth: 1,
@@ -912,7 +1039,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     backgroundColor: "rgba(99, 102, 241, 0.2)",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 24,
     marginTop: 16,
@@ -1050,6 +1177,59 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.4)",
     fontSize: 11,
   },
+  // 全屏图片查看器（可横滑切换本卡片其他图）
+  imageViewerOverlay: {
+    flex: 1,
+    backgroundColor: "#000000",
+  },
+  imageViewerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  imageViewerCloseBtn: {
+    width: 44,
+    height: 44,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imageViewerCounter: {
+    fontSize: 16,
+    color: "rgba(255,255,255,0.8)",
+  },
+  imageViewerVoteBtn: {
+    backgroundColor: "#6366F1",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+  },
+  imageViewerVoteBtnDisabled: {
+    opacity: 0.5,
+  },
+  imageViewerVoteBtnText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  imageViewerScroll: {
+    flex: 1,
+    width: SCREEN_WIDTH,
+  },
+  imageViewerScrollContent: {
+    flexDirection: "row",
+  },
+  imageViewerPage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT - 120,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imageViewerImage: {
+    width: SCREEN_WIDTH,
+    height: "100%",
+  },
   // Modal styles
   modalOverlay: {
     flex: 1,
@@ -1131,7 +1311,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingBottom: 12,
   },
   drawerTitle: {
@@ -1144,7 +1324,7 @@ const styles = StyleSheet.create({
   },
   drawerBody: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     minHeight: 200,
   },
   drawerInputRow: {

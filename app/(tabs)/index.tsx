@@ -16,7 +16,7 @@ export default function HomeScreen() {
   const params = useLocalSearchParams<{ from?: string }>();
   const { loading: authLoading } = useAuth();
 
-  // Auto redirect to vote page only on first load (not when coming from vote/waiting/result)
+  // Auto redirect to vote-flow page only on first load (not when coming from vote/waiting/result)
   useEffect(() => {
     if (authLoading) return;
 
@@ -27,7 +27,7 @@ export default function HomeScreen() {
         return; // 从等待页/结果页返回，不跳转
       }
       if (!params.from) {
-        router.replace("/vote");
+        router.replace("/vote-flow" as import("expo-router").Href);
       }
     };
 
@@ -45,7 +45,7 @@ export default function HomeScreen() {
     if (Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-    router.push("/vote");
+    router.push("/vote-flow" as import("expo-router").Href);
   };
 
   if (authLoading) {

@@ -8,6 +8,7 @@
     "dev:server": "cross-env NODE_ENV=development tsx watch server/_core/index.ts",
     "dev:mobile": "cross-env EXPO_USE_METRO_WORKSPACE_ROOT=1 npx expo start",
     "dev:android": "concurrently -k \"pnpm dev:server\" \"pnpm start:android\"",
+    "dev:db": "docker-compose up -d mysql",
     "start:android": "cross-env EXPO_USE_METRO_WORKSPACE_ROOT=1 npx expo start --android",
     "android:build": "npx expo run:android",
     "build": "esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
