@@ -5,7 +5,8 @@ vi.mock("../server/db", () => ({
   createCard: vi.fn().mockResolvedValue(1),
   getCardById: vi.fn().mockResolvedValue({
     id: 1,
-    predictedPhotoIndex: 0,
+    title: null,
+    description: null,
     totalVotes: 0,
     isCompleted: false,
     createdAt: new Date(),
@@ -22,7 +23,8 @@ vi.mock("../server/db", () => ({
   hasVotedOnCard: vi.fn().mockResolvedValue(false),
   getRandomAvailableCard: vi.fn().mockResolvedValue({
     id: 2,
-    predictedPhotoIndex: 1,
+    title: null,
+    description: null,
     totalVotes: 10,
     isCompleted: false,
   }),

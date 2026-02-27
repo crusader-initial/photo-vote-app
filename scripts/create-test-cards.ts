@@ -6,10 +6,9 @@ async function createTestCards() {
 
   // Create 5 test cards
   for (let i = 0; i < 5; i++) {
-    const predictedPhotoIndex = Math.floor(Math.random() * 3);
-    
     const cardId = await createCard({
-      predictedPhotoIndex,
+      title: `Test Card ${i + 1}`,
+      description: null,
     });
 
     console.log(`Created card ${cardId}`);

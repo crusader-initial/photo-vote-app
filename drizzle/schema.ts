@@ -34,14 +34,14 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
 /**
- * Cards table - stores voting cards created by uploaders
+ * Cards table - stores voting cards created by uploaders (matches 0000_baseline)
  */
 export const cards = mysqlTable("cards", {
   id: int("id").autoincrement().primaryKey(),
   /** User ID of the uploader (primary ownership identifier) */
   userId: int("userId"),
-  /** Index of the photo the uploader predicted would be chosen (0-based) */
-  predictedPhotoIndex: int("predictedPhotoIndex").notNull(),
+  title: varchar("title", { length: 14 }),
+  description: text("description"),
   /** Total number of votes collected */
   totalVotes: int("totalVotes").default(0).notNull(),
   /** Whether the card has reached 30 votes */
