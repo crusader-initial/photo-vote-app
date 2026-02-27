@@ -20,7 +20,8 @@ CREATE TABLE `users` (
 CREATE TABLE `cards` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`userId` int,
-	`predictedPhotoIndex` int NOT NULL,
+	`title` varchar(14),
+	`description` text,
 	`totalVotes` int NOT NULL DEFAULT 0,
 	`isCompleted` boolean NOT NULL DEFAULT false,
 	`createdAt` timestamp NOT NULL DEFAULT (now()),
@@ -74,6 +75,7 @@ CREATE TABLE `feedbacks` (
 	`type` enum('bug','suggestion','other') NOT NULL DEFAULT 'other',
 	`content` text NOT NULL,
 	`contactInfo` varchar(255),
+	`screenshot` longtext,
 	`createdAt` timestamp NOT NULL DEFAULT (now()),
 	CONSTRAINT `feedbacks_id` PRIMARY KEY(`id`)
 );

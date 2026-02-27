@@ -8,6 +8,8 @@ import {
   ScrollView,
   Platform,
   Image as RNImage,
+  TextInput,
+  KeyboardAvoidingView,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -25,11 +27,12 @@ interface PhotoData {
   mimeType: string;
 }
 
-export default function SelfGuessScreen() {
+export default function EditCopyScreen() {
   const router = useRouter();
   const [photos, setPhotos] = useState<PhotoData[]>([]);
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
 
   const createCardMutation = trpc.cards.create.useMutation({
     onSuccess: (data) => {
@@ -47,9 +50,7 @@ export default function SelfGuessScreen() {
   useEffect(() => {
     const loadPhotos = async () => {
       try {
-        console.log("[self-guess] loadPhotos start");
         const memData = getTempPhotos();
-        console.log("[self-guess] memData:", memData?.length ?? 0);
         if (memData && memData.length > 0) {
           setPhotos(memData);
           return;
@@ -57,10 +58,8 @@ export default function SelfGuessScreen() {
 
         if (Platform.OS !== "web") {
           const data = await AsyncStorage.getItem(TEMP_PHOTOS_KEY);
-          console.log("[self-guess] storage raw:", data ? `len=${data.length}` : "null");
           if (data) {
             const parsed = JSON.parse(data);
-            console.log("[self-guess] storage parsed:", parsed?.length ?? 0);
             setPhotos(parsed);
             return;
           }
@@ -78,30 +77,7 @@ export default function SelfGuessScreen() {
     loadPhotos();
   }, []);
 
-  useEffect(() => {
-    console.log(
-      "[self-guess] photos state:",
-      photos.map((p) => ({
-        uri: p.uri,
-        mimeType: p.mimeType,
-        hasBase64: !!p.base64,
-        base64Len: p.base64?.length ?? 0,
-      }))
-    );
-  }, [photos]);
-
-  const handleSelect = (index: number) => {
-    setSelectedIndex(index);
-  };
-
   const handleConfirm = () => {
-    if (selectedIndex === null) {
-      const msg = "请选择你认为会被选中的照片";
-      if (Platform.OS === "web") window.alert(msg);
-      else Alert.alert("提示", msg);
-      return;
-    }
-
     if (photos.length < 2) {
       const msg = "照片数据异常，请返回重新选择";
       if (Platform.OS === "web") window.alert(msg);
@@ -110,7 +86,8 @@ export default function SelfGuessScreen() {
     }
 
     createCardMutation.mutate({
-      predictedPhotoIndex: selectedIndex,
+      title: title.trim() || undefined,
+      description: description.trim() || undefined,
       photos: photos.map((p) => ({
         base64: p.base64,
         mimeType: p.mimeType,
@@ -124,9 +101,7 @@ export default function SelfGuessScreen() {
     router.back();
   };
 
-  const canConfirm = useMemo(() => {
-    return selectedIndex !== null && photos.length >= 2;
-  }, [selectedIndex, photos.length]);
+  const canConfirm = useMemo(() => photos.length >= 2, [photos.length]);
 
   if (loading) {
     return (
@@ -140,77 +115,103 @@ export default function SelfGuessScreen() {
 
   return (
     <ScreenContainer edges={["top", "left", "right", "bottom"]} className="flex-1">
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.header}>
-          <Pressable onPress={handleBack} style={styles.backButton}>
-            <IconSymbol name="arrow.left" size={24} color="#11181C" />
-          </Pressable>
-          <Text style={styles.title}>做个预测</Text>
-          <View style={styles.placeholder} />
-        </View>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.header}>
+            <Pressable onPress={handleBack} style={styles.backButton}>
+              <IconSymbol name="arrow.left" size={24} color="#11181C" />
+            </Pressable>
+            <Text style={styles.title}>编辑文案</Text>
+            <View style={styles.placeholder} />
+          </View>
 
-        <Text style={styles.subtitle}>选择你认为大家会选中的那张照片</Text>
-        <Text style={styles.debugText}>共 {photos.length} 张</Text>
+          <Text style={styles.subtitle}>为你的投票卡片添加标题和说明</Text>
 
-        <View style={styles.gridContainer}>
-          {photos.map((photo, index) => {
-            const imageUri =
-              photo.base64 ? `data:${photo.mimeType};base64,${photo.base64}` : photo.uri || "";
-            return (
-              <View key={`${photo.uri}-${index}`} style={styles.gridItem}>
-                <Pressable
-                  onPress={() => handleSelect(index)}
-                  style={({ pressed }) => [
-                    styles.photoContainer,
-                    selectedIndex === index && styles.photoSelected,
-                    pressed && styles.photoPressed,
-                  ]}
-                >
-                  {imageUri ? (
-                    <RNImage source={{ uri: imageUri }} style={styles.photo} resizeMode="cover" />
-                  ) : (
-                    <View style={styles.photoFallback} />
-                  )}
-                  {selectedIndex === index && (
-                    <View style={styles.selectedOverlay}>
-                      <View style={styles.checkmark}>
-                        <Text style={styles.checkmarkText}>✓</Text>
-                      </View>
-                    </View>
-                  )}
-                </Pressable>
+          {/* Photo preview grid (read-only) */}
+          <View style={styles.gridContainer}>
+            {photos.map((photo, index) => {
+              const imageUri =
+                photo.base64 ? `data:${photo.mimeType};base64,${photo.base64}` : photo.uri || "";
+              return (
+                <View key={`${photo.uri}-${index}`} style={styles.gridItem}>
+                  <View style={styles.photoContainer}>
+                    {imageUri ? (
+                      <RNImage source={{ uri: imageUri }} style={styles.photo} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.photoFallback} />
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          {photos.length === 0 && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>未找到照片，请返回重选</Text>
+              <ActionButton
+                title="返回重选"
+                onPress={handleBack}
+                variant="outline"
+                size="medium"
+                fullWidth
+              />
+            </View>
+          )}
+
+          {/* Text fields */}
+          <View style={styles.fieldsContainer}>
+            <View style={styles.fieldGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>标题</Text>
+                <Text style={styles.optionalTag}>选填</Text>
               </View>
-            );
-          })}
-        </View>
+              <TextInput
+                style={styles.textInput}
+                placeholder="给这组照片起个标题..."
+                placeholderTextColor="#9CA3AF"
+                value={title}
+                onChangeText={setTitle}
+                maxLength={15}
+                returnKeyType="next"
+              />
+              <Text style={styles.charCount}>{title.length}/15</Text>
+            </View>
 
-        {photos.length === 0 && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>未找到照片，请返回重选</Text>
+            <View style={styles.fieldGroup}>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>说明</Text>
+                <Text style={styles.optionalTag}>选填</Text>
+              </View>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                placeholder="添加一些描述或背景信息..."
+                placeholderTextColor="#9CA3AF"
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                maxLength={200}
+                textAlignVertical="top"
+              />
+              <Text style={styles.charCount}>{description.length}/200</Text>
+            </View>
+          </View>
+
+          <View style={styles.footer}>
             <ActionButton
-              title="返回重选"
-              onPress={handleBack}
-              variant="outline"
-              size="medium"
+              title="确认创建"
+              onPress={handleConfirm}
+              disabled={!canConfirm}
+              loading={createCardMutation.isPending}
+              size="large"
               fullWidth
             />
           </View>
-        )}
-
-        <View style={styles.footer}>
-          <Text style={styles.hintText}>
-            {selectedIndex !== null ? `已选择第 ${selectedIndex + 1} 张照片` : "点击选择一张照片"}
-          </Text>
-          <ActionButton
-            title="确认创建"
-            onPress={handleConfirm}
-            disabled={!canConfirm}
-            loading={createCardMutation.isPending}
-            size="large"
-            fullWidth
-          />
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </ScreenContainer>
   );
 }
@@ -251,18 +252,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#687076",
     textAlign: "center",
-    marginBottom: 24,
-  },
-  debugText: {
-    fontSize: 12,
-    color: "#9CA3AF",
-    textAlign: "center",
-    marginBottom: 12,
+    marginBottom: 20,
   },
   gridContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
+    marginBottom: 8,
   },
   gridItem: {
     width: "48%",
@@ -270,20 +266,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   photoContainer: {
-    width: "45%",
-    aspectRatio: 1,
+    width: "100%",
+    height: "100%",
     borderRadius: 16,
     overflow: "hidden",
-    borderWidth: 3,
-    borderColor: "transparent",
     backgroundColor: "#F3F4F6",
-  },
-  photoSelected: {
-    borderColor: "#6366F1",
-  },
-  photoPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
   },
   photo: {
     width: "100%",
@@ -294,35 +281,6 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: "#E5E7EB",
   },
-  selectedOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(99, 102, 241, 0.3)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  checkmark: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#6366F1",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  checkmarkText: {
-    color: "white",
-    fontSize: 28,
-    fontWeight: "bold",
-  },
-  footer: {
-    marginTop: 32,
-    alignItems: "center",
-    gap: 16,
-    width: "100%",
-  },
-  hintText: {
-    fontSize: 14,
-    color: "#687076",
-  },
   emptyState: {
     marginTop: 24,
     gap: 12,
@@ -332,5 +290,53 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: "#687076",
+  },
+  fieldsContainer: {
+    gap: 20,
+    marginTop: 8,
+  },
+  fieldGroup: {
+    gap: 6,
+  },
+  labelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  fieldLabel: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#11181C",
+  },
+  optionalTag: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    backgroundColor: "#F3F4F6",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  textInput: {
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1.5,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#11181C",
+  },
+  textArea: {
+    minHeight: 90,
+    paddingTop: 12,
+  },
+  charCount: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    textAlign: "right",
+  },
+  footer: {
+    marginTop: 28,
+    width: "100%",
   },
 });

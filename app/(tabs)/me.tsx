@@ -328,10 +328,12 @@ export default function MeScreen() {
   const [showHistory, setShowHistory] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [deregistering, setDeregistering] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [pendingAsset, setPendingAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
 
   const updateAvatarMutation = trpc.users.updateAvatar.useMutation();
+  const deregisterMutation = trpc.auth.deregister.useMutation();
 
   useFocusEffect(
     useCallback(() => {
@@ -417,6 +419,32 @@ export default function MeScreen() {
               await logout();
             } finally {
               setLoggingOut(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleDeregister = () => {
+    haptic();
+    Alert.alert(
+      "注销账号",
+      "注销后账号及所有数据将被永久删除，无法恢复，确定继续吗？",
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "确认注销",
+          style: "destructive",
+          onPress: async () => {
+            setDeregistering(true);
+            try {
+              await deregisterMutation.mutateAsync();
+              await logout();
+            } catch (e: any) {
+              Alert.alert("注销失败", e?.message ?? "请稍后重试");
+            } finally {
+              setDeregistering(false);
             }
           },
         },
@@ -603,6 +631,14 @@ export default function MeScreen() {
               )}
               <Text style={[styles.logoutText, { color: colors.muted }]}>退出登录</Text>
             </View>
+          )}
+        </Pressable>
+
+        <Pressable onPress={handleDeregister} disabled={deregistering} style={styles.deregisterWrap}>
+          {({ pressed }) => (
+            <Text style={[styles.deregisterText, pressed && { opacity: 0.5 }, deregistering && { opacity: 0.4 }]}>
+              {deregistering ? "注销中…" : "注销账号"}
+            </Text>
           )}
         </Pressable>
       </ScrollView>
@@ -809,6 +845,16 @@ const styles = StyleSheet.create({
   },
   logoutDisabled: {
     opacity: 0.6,
+  },
+  deregisterWrap: {
+    alignItems: "center",
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  deregisterText: {
+    fontSize: 13,
+    color: "#EF4444",
+    textDecorationLine: "underline",
   },
   cardShadow: {
     shadowColor: "#000",

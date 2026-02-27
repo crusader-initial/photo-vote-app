@@ -17,6 +17,12 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
+    deregister: protectedProcedure.mutation(async ({ ctx }) => {
+      await db.deleteUser(ctx.user.id);
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      return { success: true } as const;
+    }),
   }),
 
   // User operations
@@ -42,7 +48,8 @@ export const appRouter = router({
     // Create a new card with photos
     create: protectedProcedure
       .input(z.object({
-        predictedPhotoIndex: z.number().min(0).max(3),
+        title: z.string().max(14).optional(),
+        description: z.string().max(2000).optional(),
         photos: z.array(z.object({
           base64: z.string(),
           mimeType: z.string(),
@@ -51,7 +58,8 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const cardId = await db.createCard({
           userId: ctx.user.id,
-          predictedPhotoIndex: input.predictedPhotoIndex,
+          title: input.title || null,
+          description: input.description || null,
         });
 
         try {
@@ -150,9 +158,29 @@ export const appRouter = router({
         photoId: z.number(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const hasVoted = await db.hasVotedOnCard(ctx.user.id, input.cardId);
-        if (hasVoted) {
-          throw new Error("Already voted on this card");
+        const existingVote = await db.getVoteByUserAndCard(ctx.user.id, input.cardId);
+        if (existingVote) {
+          // 已投过票：直接返回已有结果，不抛错，前端统一走 onSuccess 流程
+          const photos = await db.getPhotosByCardId(input.cardId);
+          const totalVotes = photos.reduce((sum, p) => sum + p.voteCount, 0);
+          const votedPhoto = photos.find(p => p.id === existingVote.photoId);
+          const voteCount = votedPhoto?.voteCount ?? 0;
+          const percentage = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
+          const photoStats = photos.map(photo => ({
+            id: photo.id,
+            voteCount: photo.voteCount,
+            percentage: totalVotes > 0 ? Math.round((photo.voteCount / totalVotes) * 100) : 0,
+          }));
+          return {
+            success: true,
+            alreadyVoted: true as const,
+            photoId: existingVote.photoId,
+            percentage,
+            voteCount,
+            totalVotes,
+            voteDate: existingVote.voteDate,
+            photoStats,
+          };
         }
 
         const today = new Date().toISOString().split('T')[0];
@@ -178,13 +206,21 @@ export const appRouter = router({
         const percentage = totalVotes > 0 && votedPhoto 
           ? Math.round((votedPhoto.voteCount / totalVotes) * 100) 
           : 0;
+        const photoStats = photos.map(photo => ({
+          id: photo.id,
+          voteCount: photo.voteCount,
+          percentage: totalVotes > 0 ? Math.round((photo.voteCount / totalVotes) * 100) : 0,
+        }));
 
         return {
           success: true,
+          alreadyVoted: false as const,
+          photoId: input.photoId,
           percentage,
           voteCount: votedPhoto?.voteCount ?? 0,
           totalVotes,
           voteDate: today,
+          photoStats,
         };
       }),
 
@@ -331,6 +367,8 @@ export const appRouter = router({
         type: z.enum(["bug", "suggestion", "other"]),
         content: z.string().min(1).max(2000),
         contactInfo: z.string().max(255).optional(),
+        /** Optional screenshots as base64 data URLs; stored as JSON array in DB */
+        screenshots: z.array(z.string().max(10_000_000)).max(9).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         await db.createFeedback({
@@ -338,6 +376,9 @@ export const appRouter = router({
           type: input.type,
           content: input.content,
           contactInfo: input.contactInfo,
+          screenshot: input.screenshots?.length
+            ? JSON.stringify(input.screenshots)
+            : undefined,
         });
         return { success: true };
       }),

@@ -1,13 +1,1 @@
-{
-  "version": "6",
-  "dialect": "mysql",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "5",
-      "when": 1740441600000,
-      "tag": "0000_baseline",
-      "breakpoints": true
-    }
-  ]
-}
+{"version":"6","dialect":"mysql","entries":[{"idx":0,"version":"5","when":1740441600000,"tag":"0000_baseline","breakpoints":true}]}

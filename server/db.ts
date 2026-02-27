@@ -175,6 +175,30 @@ export async function updateCardVotes(cardId: number, totalVotes: number, isComp
   await db.update(cards).set({ totalVotes, isCompleted }).where(eq(cards.id, cardId));
 }
 
+/** Delete a user account and all their associated data. */
+export async function deleteUser(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  // Delete all cards the user owns (with their photos, votes, comments, favorites)
+  const userCards = await db.select({ id: cards.id }).from(cards).where(eq(cards.userId, userId));
+  for (const card of userCards) {
+    await db.delete(votes).where(eq(votes.cardId, card.id));
+    await db.delete(comments).where(eq(comments.cardId, card.id));
+    await db.delete(favorites).where(eq(favorites.cardId, card.id));
+    await db.delete(photos).where(eq(photos.cardId, card.id));
+    await db.delete(cards).where(eq(cards.id, card.id));
+  }
+
+  // Delete user's votes, comments, favorites on other cards
+  await db.delete(votes).where(eq(votes.userId, userId));
+  await db.delete(comments).where(eq(comments.userId, userId));
+  await db.delete(favorites).where(eq(favorites.userId, userId));
+  await db.delete(feedbacks).where(eq(feedbacks.userId, userId));
+
+  await db.delete(users).where(eq(users.id, userId));
+}
+
 /** Delete a card and all related data. Only allowed for card owner (userId). */
 export async function deleteCard(cardId: number, userId: number): Promise<boolean> {
   const db = await getDb();

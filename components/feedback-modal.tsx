@@ -12,6 +12,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -35,6 +37,8 @@ export function FeedbackModal({ visible, onClose }: Props) {
   const [type, setType] = useState<FeedbackType>("suggestion");
   const [content, setContent] = useState("");
   const [contactInfo, setContactInfo] = useState("");
+  /** Screenshot as base64 data URL (data:image/xxx;base64,...) */
+  const [screenshot, setScreenshot] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   const submitMutation = trpc.feedbacks.submit.useMutation();
@@ -49,6 +53,7 @@ export function FeedbackModal({ visible, onClose }: Props) {
     setTimeout(() => {
       setContent("");
       setContactInfo("");
+      setScreenshot(null);
       setType("suggestion");
       setSubmitted(false);
     }, 300);
@@ -65,6 +70,7 @@ export function FeedbackModal({ visible, onClose }: Props) {
         type,
         content: content.trim(),
         contactInfo: contactInfo.trim() || undefined,
+        screenshot: screenshot ?? undefined,
       });
       setSubmitted(true);
     } catch (e: any) {
@@ -74,13 +80,36 @@ export function FeedbackModal({ visible, onClose }: Props) {
 
   const selectedType = FEEDBACK_TYPES.find((t) => t.value === type)!;
 
+  const pickScreenshot = async () => {
+    haptic();
+    if (Platform.OS !== "web") {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("需要权限", "请允许访问相册以上传截图");
+        return;
+      }
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [16, 10],
+      quality: 0.7,
+      base64: true,
+    });
+    if (!result.canceled && result.assets?.[0]?.base64) {
+      const asset = result.assets[0];
+      const mime = asset.mimeType ?? "image/jpeg";
+      setScreenshot(`data:${mime};base64,${asset.base64}`);
+    }
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === "ios" ? "padding" : "padding"}
+      >
         <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
         <View style={[styles.sheetInner, { backgroundColor: colors.background }]}>
           {/* Handle */}
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
@@ -166,6 +195,29 @@ export function FeedbackModal({ visible, onClose }: Props) {
               />
               <Text style={[styles.charCount, { color: colors.muted }]}>{content.length} / 2000</Text>
 
+              {/* Screenshot upload */}
+              <Text style={[styles.label, { color: colors.muted }]}>截图（选填）</Text>
+              {screenshot ? (
+                <View style={styles.screenshotWrap}>
+                  <Image source={{ uri: screenshot }} style={styles.screenshotPreview} contentFit="cover" />
+                  <Pressable
+                    onPress={() => { haptic(); setScreenshot(null); }}
+                    style={[styles.screenshotRemove, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  >
+                    <IconSymbol name="xmark.circle.fill" size={20} color={colors.muted} />
+                    <Text style={[styles.screenshotRemoveText, { color: colors.muted }]}>移除</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable
+                  onPress={pickScreenshot}
+                  style={[styles.screenshotBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                >
+                  <IconSymbol name="photo.on.rectangle.angled" size={22} color={colors.muted} />
+                  <Text style={[styles.screenshotBtnText, { color: colors.muted }]}>上传截图</Text>
+                </Pressable>
+              )}
+
               {/* Contact info */}
               <Text style={[styles.label, { color: colors.muted }]}>联系方式（选填）</Text>
               <TextInput
@@ -211,8 +263,7 @@ export function FeedbackModal({ visible, onClose }: Props) {
             </ScrollView>
           )}
         </View>
-        </KeyboardAvoidingView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -4,7 +4,6 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
 import { ScreenContainer } from "@/components/screen-container";
-import { ActionButton } from "@/components/action-button";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
@@ -126,12 +125,11 @@ export default function ResultScreen() {
 
   const totalVotes = card.photos.reduce((sum, p) => sum + p.voteCount, 0);
   const sortedPhotos = [...card.photos].sort((a, b) => b.voteCount - a.voteCount);
-  const winnerIndex = sortedPhotos[0]?.photoIndex;
-  const isPredictionCorrect = card.predictedPhotoIndex === winnerIndex;
 
   return (
     <ScreenContainer edges={["top", "left", "right", "bottom"]} className="flex-1">
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <View style={styles.page}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
           <Pressable onPress={handleBack} style={styles.backButton}>
@@ -141,20 +139,17 @@ export default function ResultScreen() {
           <View style={styles.placeholder} />
         </View>
 
-        {/* Prediction Result */}
-        <View style={[
-          styles.predictionBanner,
-          isPredictionCorrect ? styles.predictionCorrect : styles.predictionWrong
-        ]}>
-          <Text style={styles.predictionText}>
-            {isPredictionCorrect ? "🎉 预测正确！" : "😅 预测失败"}
-          </Text>
-          <Text style={styles.predictionSubtext}>
-            {isPredictionCorrect
-              ? "你选的照片确实最受欢迎"
-              : `你选了第 ${card.predictedPhotoIndex + 1} 张，但第 ${winnerIndex + 1} 张最受欢迎`}
-          </Text>
-        </View>
+        {/* Card title & description */}
+        {(card.title || card.description) && (
+          <View style={styles.cardCopyContainer}>
+            {card.title ? (
+              <Text style={styles.cardTitle}>{card.title}</Text>
+            ) : null}
+            {card.description ? (
+              <Text style={styles.cardDescription}>{card.description}</Text>
+            ) : null}
+          </View>
+        )}
 
         {/* Results List */}
         <View style={styles.resultsContainer}>
@@ -163,7 +158,6 @@ export default function ResultScreen() {
               ? Math.round((photo.voteCount / totalVotes) * 100)
               : 0;
             const isWinner = index === 0;
-            const isPredicted = photo.photoIndex === card.predictedPhotoIndex;
 
             return (
               <View key={photo.id} style={styles.resultItem}>
@@ -180,11 +174,6 @@ export default function ResultScreen() {
                   {isWinner && (
                     <View style={styles.winnerBadge}>
                       <Text style={styles.winnerText}>👑</Text>
-                    </View>
-                  )}
-                  {isPredicted && (
-                    <View style={styles.predictedBadge}>
-                      <Text style={styles.predictedText}>预测</Text>
                     </View>
                   )}
                 </View>
@@ -447,38 +436,50 @@ export default function ResultScreen() {
           )}
         </View>
 
+        </ScrollView>
+
         {/* Actions */}
         <View style={styles.actionsContainer}>
           <Pressable
             onPress={handleToggleFavorite}
             disabled={toggleFavoriteMutation.isPending}
-            style={({ pressed }) => [
-              styles.favoriteBtn,
-              isFavorited && styles.favoriteBtnActive,
-              pressed && styles.favoriteBtnPressed,
-            ]}
           >
-            <IconSymbol
-              name={isFavorited ? "heart.fill" : "heart"}
-              size={22}
-              color={isFavorited ? "#EF4444" : "#6366F1"}
-            />
-            <Text style={[styles.favoriteBtnText, isFavorited && styles.favoriteBtnTextActive]}>
-              {isFavorited ? "取消收藏" : "收藏"}
-            </Text>
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.favBtn,
+                  isFavorited ? styles.favBtnActive : styles.favBtnInactive,
+                  pressed && styles.favBtnPressed,
+                  toggleFavoriteMutation.isPending && styles.favBtnLoading,
+                ]}
+              >
+                {toggleFavoriteMutation.isPending ? (
+                  <ActivityIndicator color={isFavorited ? "#ffffff" : "#6366F1"} size="small" />
+                ) : (
+                  <>
+                    <IconSymbol
+                      name={isFavorited ? "heart.fill" : "heart"}
+                      size={20}
+                      color={isFavorited ? "#ffffff" : "#6366F1"}
+                    />
+                    <Text style={[styles.favBtnText, isFavorited ? styles.favBtnTextActive : styles.favBtnTextInactive]}>
+                      {isFavorited ? "已收藏" : "收藏"}
+                    </Text>
+                  </>
+                )}
+              </View>
+            )}
           </Pressable>
-          <ActionButton
-            title={fromFavorites ? "返回收藏" : "返回首页"}
-            onPress={handleBack}
-            size="large"
-          />
         </View>
-      </ScrollView>
+      </View>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  page: {
+    flex: 1,
+  },
   scrollContent: {
     flexGrow: 1,
     padding: 20,
@@ -504,27 +505,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#687076",
   },
-  predictionBanner: {
-    padding: 16,
+  cardCopyContainer: {
+    backgroundColor: "#F9FAFB",
     borderRadius: 16,
-    alignItems: "center",
+    padding: 16,
     marginBottom: 24,
+    gap: 6,
   },
-  predictionCorrect: {
-    backgroundColor: "#DCFCE7",
-  },
-  predictionWrong: {
-    backgroundColor: "#FEF3C7",
-  },
-  predictionText: {
-    fontSize: 20,
-    fontWeight: "bold",
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "700",
     color: "#11181C",
   },
-  predictionSubtext: {
+  cardDescription: {
     fontSize: 14,
     color: "#687076",
-    marginTop: 4,
+    lineHeight: 20,
   },
   resultsContainer: {
     gap: 16,
@@ -571,20 +567,6 @@ const styles = StyleSheet.create({
   },
   winnerText: {
     fontSize: 14,
-  },
-  predictedBadge: {
-    position: "absolute",
-    bottom: -4,
-    left: -4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    backgroundColor: "#6366F1",
-  },
-  predictedText: {
-    fontSize: 10,
-    color: "#ffffff",
-    fontWeight: "bold",
   },
   statsContainer: {
     flex: 1,
@@ -633,35 +615,48 @@ const styles = StyleSheet.create({
   },
   actionsContainer: {
     alignItems: "stretch",
-    marginTop: 24,
-    gap: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    paddingTop: 8,
   },
-  favoriteBtn: {
+  favBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
+    borderRadius: 14,
+    minHeight: 52,
+    paddingHorizontal: 32,
+  },
+  favBtnActive: {
+    backgroundColor: "#F59E0B",
+    shadowColor: "#B45309",
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  favBtnInactive: {
+    backgroundColor: "#ffffff",
     borderWidth: 2,
     borderColor: "#6366F1",
-    backgroundColor: "transparent",
   },
-  favoriteBtnActive: {
-    borderColor: "#EF4444",
-    backgroundColor: "#FEF2F2",
+  favBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.97 }],
   },
-  favoriteBtnPressed: {
-    opacity: 0.8,
+  favBtnLoading: {
+    opacity: 0.6,
   },
-  favoriteBtnText: {
+  favBtnText: {
     fontSize: 16,
-    fontWeight: "600",
-    color: "#6366F1",
+    fontWeight: "700",
   },
-  favoriteBtnTextActive: {
-    color: "#EF4444",
+  favBtnTextActive: {
+    color: "#ffffff",
+  },
+  favBtnTextInactive: {
+    color: "#6366F1",
   },
   commentsSection: {
     marginTop: 24,

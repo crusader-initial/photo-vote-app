@@ -29,7 +29,7 @@ const MAPPING = {
   "chevron.up": "keyboard-arrow-up",
   "trash.fill": "delete",
   "heart.fill": "favorite",
-  "heart": "favorite",
+  "heart": "favorite-border",
   "cup.and.saucer.fill": "local-cafe",
   "xmark.circle.fill": "cancel",
   "person.2.fill": "people",
@@ -37,6 +37,7 @@ const MAPPING = {
   "photo.stack.fill": "photo-library",
   "rectangle.portrait.and.arrow.right": "logout",
   "arrow.right": "arrow-forward",
+  "plus": "add",
 } as IconMapping;
 
 /**
