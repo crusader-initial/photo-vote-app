@@ -11,7 +11,7 @@ import { getImageUrl } from "@/lib/utils";
 
 const SKIP_VOTE_REDIRECT_KEY = "@skip_vote_redirect";
 
-type CommentWithVote = { id: number; userName: string; content: string; createdAt: Date; votedPhotoId: number | null; replyCount?: number };
+type CommentWithVote = { id: number; userId?: number | null; userName: string; content: string; createdAt: Date; votedPhotoId: number | null; replyCount?: number };
 type ReplyBlock = { replies: CommentWithVote[]; parentUserName: string };
 
 export default function ResultScreen() {
@@ -288,6 +288,11 @@ export default function ResultScreen() {
                           <View style={styles.commentBody}>
                             <View style={styles.commentRow}>
                               <Text style={styles.commentUser}>{comment.userName}</Text>
+                              {comment.userId != null && comment.userId === card?.userId && (
+                                <View style={styles.authorBadge}>
+                                  <Text style={styles.authorBadgeText}>作者</Text>
+                                </View>
+                              )}
                               {votedPhoto && photoIndex >= 0 && (
                                 <View style={styles.voteBadge}>
                                   <IconSymbol name="checkmark.circle.fill" size={12} color="#6366F1" />
@@ -327,6 +332,11 @@ export default function ResultScreen() {
                                         <View style={styles.commentBody}>
                                           <View style={styles.commentRow}>
                                             <Text style={styles.commentUser}>{reply.userName}</Text>
+                                            {reply.userId != null && reply.userId === card?.userId && (
+                                              <View style={styles.authorBadge}>
+                                                <Text style={styles.authorBadgeText}>作者</Text>
+                                              </View>
+                                            )}
                                             {rPhoto && rIdx >= 0 && (
                                               <View style={styles.voteBadge}>
                                                 <IconSymbol name="checkmark.circle.fill" size={12} color="#6366F1" />
@@ -781,6 +791,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#11181C",
+  },
+  authorBadge: {
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  authorBadgeText: {
+    fontSize: 11,
+    color: "#D97706",
+    fontWeight: "600",
   },
   voteBadge: {
     flexDirection: "row",
