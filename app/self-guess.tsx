@@ -31,7 +31,7 @@ export default function EditCopyScreen() {
   const router = useRouter();
   const [photos, setPhotos] = useState<PhotoData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState("选择你喜欢的");
   const [description, setDescription] = useState("");
 
   const createCardMutation = trpc.cards.create.useMutation({
