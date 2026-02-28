@@ -168,21 +168,38 @@ function handleDrop(e){
   addFiles(Array.from(e.dataTransfer.files).filter(function(f){return f.type.startsWith('image/');}));
 }
 
-function addFiles(files){
-  var remaining=4-photos.length;
-  var toAdd=files.slice(0,remaining);
-  toAdd.forEach(function(file){
-    var reader=new FileReader();
-    reader.onload=function(ev){
-      var dataUrl=ev.target.result;
-      var mime=file.type||'image/jpeg';
+  function compressImage(file,callback){
+    var objectUrl=URL.createObjectURL(file);
+    var img=new Image();
+    img.onload=function(){
+      var MAX=1200;
+      var w=img.width,h=img.height;
+      if(w>MAX||h>MAX){
+        if(w>h){h=Math.round(h*MAX/w);w=MAX;}
+        else{w=Math.round(w*MAX/h);h=MAX;}
+      }
+      var canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      var ctx=canvas.getContext('2d');
+      ctx.drawImage(img,0,0,w,h);
+      var mime='image/jpeg';
+      var dataUrl=canvas.toDataURL(mime,0.85);
       var b64=dataUrl.split(',')[1];
-      photos.push({base64:b64,mimeType:mime,objectUrl:URL.createObjectURL(file)});
-      renderPhotos();
+      callback({base64:b64,mimeType:mime,objectUrl:objectUrl});
     };
-    reader.readAsDataURL(file);
-  });
-}
+    img.src=objectUrl;
+  }
+
+  function addFiles(files){
+    var remaining=4-photos.length;
+    var toAdd=files.slice(0,remaining);
+    toAdd.forEach(function(file){
+      compressImage(file,function(photo){
+        photos.push(photo);
+        renderPhotos();
+      });
+    });
+  }
 
 function renderPhotos(){
   var grid=document.getElementById('photoGrid');
@@ -227,6 +244,13 @@ async function doUpload(){
     if(desc) body.description=desc;
     var r=await fetch('/api/admin/create-card',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     pb.style.width='90%';
+    if(!r.ok){
+      var errText=await r.text().catch(function(){return '';});
+      pb.style.width='0';pw.classList.add('hidden');
+      setMsg('请求失败 HTTP '+r.status+' — '+errText.replace(/<[^>]*>/g,'').trim().slice(0,120),'err');
+      btn.disabled=false;btn.textContent='上传投票卡片';
+      return;
+    }
     var d=await r.json();
     if(d.success){
       pb.style.width='100%';
