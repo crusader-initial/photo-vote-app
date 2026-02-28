@@ -131,7 +131,7 @@ export const appRouter = router({
     // Public: unauthenticated users can browse cards (but cannot vote/comment/favorite)
     getRandomForVotingBatch: publicProcedure
       .input(z.object({
-        count: z.number().min(1).max(10),
+        count: z.number().min(1).max(50),
         excludeCardIds: z.array(z.number()).optional(),
       }))
       .query(async ({ input, ctx }) => {

@@ -18,8 +18,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SWIPE_THRESHOLD = SCREEN_HEIGHT * 0.08;
-const PREFETCH_COUNT = 3;
-const RECENT_IDS_MAX = 20;
+const BATCH_SIZE = 50;
+const QUEUE_MAX = 200;
+const QUEUE_KEEP = 50;
+const REFILL_THRESHOLD = 5;
 
 /** "YYYY-MM-DD" -> "YYYY年M月D日" */
 function formatVoteDate(voteDate: string): string {
@@ -45,10 +47,11 @@ export default function ImageTestScreen() {
   const [currentCard, setCurrentCard] = useState<VoteCardData | null>(null);
   const [cardQueue, setCardQueue] = useState<VoteCardData[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
-  const recentCardIdsRef = useRef<number[]>([]);
+  /** 本次会话所有已入队的卡片 ID，用于服务端排重 */
+  const sessionQueueIdsRef = useRef<number[]>([]);
+  const isRefillInProgress = useRef(false);
   const [previousCards, setPreviousCards] = useState<VoteCardData[]>([]);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const seenCardsRef = useRef<VoteCardData[]>([]);
 
   const [selectedPhotoId, setSelectedPhotoId] = useState<number | null>(null);
   const [showResult, setShowResult] = useState(false);
@@ -75,37 +78,77 @@ export default function ImageTestScreen() {
   const fetchBatch = useCallback(
     async (excludeCardIds: number[]): Promise<VoteCardData[]> => {
       const batch = await utils.cards.getRandomForVotingBatch.fetch({
-        count: PREFETCH_COUNT,
+        count: BATCH_SIZE,
         excludeCardIds: excludeCardIds.length > 0 ? excludeCardIds : undefined,
       });
-      const cards = (batch as VoteCardData[]).filter((c) => c.photos && c.photos.length > 0);
-      // 已登录时提前 prefetch 每张卡片的投票记录，填充缓存消除竞态
+      const fetched = (batch as VoteCardData[]).filter((c) => c.photos && c.photos.length > 0);
       if (user) {
-        cards.forEach((card) => {
+        fetched.forEach((card) => {
           utils.votes.myVoteResult.prefetch({ cardId: card.id }).catch(() => {});
         });
       }
-      return cards;
+      return fetched;
     },
     [utils.cards.getRandomForVotingBatch, utils.votes.myVoteResult, user]
   );
 
+  /**
+   * 从服务端拉取一批新卡片，追加到会话队列。
+   *
+   * isInitial=false（后台补充）：
+   *   服务端返 0 → 静默忽略，display buffer 里还有卡，等自然耗尽再重置
+   *
+   * isInitial=true（buffer 已空，用户无牌可看）：
+   *   服务端返 0 → 此时才清空 sessionQueueIds 并重新拉取，开始新一轮循环
+   *   使用函数式更新，避免与 back-swipe 竞争覆盖已恢复的卡片
+   */
+  const performRefill = useCallback(
+    async (isInitial: boolean) => {
+      if (isRefillInProgress.current) return;
+      isRefillInProgress.current = true;
+      if (isInitial) setQueueLoading(true);
+
+      try {
+        let batch = await fetchBatch([...sessionQueueIdsRef.current]);
+
+        if (batch.length === 0 && isInitial) {
+          // buffer 已空且无新卡 → 清空会话，重新开始循环
+          sessionQueueIdsRef.current = [];
+          batch = await fetchBatch([]);
+        }
+
+        if (batch.length > 0) {
+          sessionQueueIdsRef.current = [
+            ...sessionQueueIdsRef.current,
+            ...batch.map((c) => c.id),
+          ];
+          // 超出 200 时保留最新 50 个（它们正好在 display buffer 里）
+          if (sessionQueueIdsRef.current.length >= QUEUE_MAX) {
+            sessionQueueIdsRef.current = sessionQueueIdsRef.current.slice(-QUEUE_KEEP);
+          }
+
+          if (isInitial) {
+            // 函数式更新：若用户已 back-swipe 恢复了卡片，则不覆盖
+            setCurrentCard((prev) => (prev !== null ? prev : batch[0] ?? null));
+            setCardQueue((prev) => (prev.length > 0 ? prev : batch.slice(1)));
+          } else {
+            setCardQueue((prev) => [...prev, ...batch]);
+          }
+        }
+      } catch (e) {
+        console.error("Refill failed:", e);
+      } finally {
+        isRefillInProgress.current = false;
+        if (isInitial) setQueueLoading(false);
+      }
+    },
+    [fetchBatch]
+  );
+
   useEffect(() => {
-    if (cardQueue.length > 0 || isTransitioning) return;
-    setQueueLoading(true);
-    const exclude = recentCardIdsRef.current;
-    fetchBatch(exclude)
-      .then((batch) => {
-        setCardQueue(batch);
-        setCurrentCard(batch[0] ?? null);
-      })
-      .catch((e) => {
-        console.error("Batch fetch failed:", e);
-      })
-      .finally(() => {
-        setQueueLoading(false);
-      });
-  }, [cardQueue.length, isTransitioning, fetchBatch]);
+    if (currentCard || cardQueue.length > 0 || isTransitioning) return;
+    performRefill(true);
+  }, [currentCard, cardQueue.length, isTransitioning, performRefill]);
 
   const submitVoteMutation = trpc.votes.submit.useMutation({
     onSuccess: (data, variables) => {
@@ -290,57 +333,28 @@ export default function ImageTestScreen() {
     setExpandedPhotoIndex(null);
     translateY.value = 0;
     cardOpacity.value = 1;
-    const prevId = currentCard?.id;
+
     if (currentCard) {
       setPreviousCards((prev) => [...prev, currentCard]);
     }
-    if (currentCard && !seenCardsRef.current.find((c) => c.id === currentCard.id)) {
-      seenCardsRef.current.push(currentCard);
-    }
-    if (prevId != null) {
-      recentCardIdsRef.current = [
-        prevId,
-        ...recentCardIdsRef.current.slice(0, RECENT_IDS_MAX - 1),
-      ];
-    }
 
-    if (cardQueue.length > 1) {
-      const next = cardQueue[1];
-      setCardQueue((prev) => prev.slice(1));
+    if (cardQueue.length > 0) {
+      const [next, ...rest] = cardQueue;
       setCurrentCard(next);
-      const exclude = [
-        ...recentCardIdsRef.current,
-        ...cardQueue.slice(1).map((c) => c.id),
-      ];
-      fetchBatch(exclude).then((append) => {
-        setCardQueue((prev) => [...prev, ...append]);
-      });
-    } else {
-      const loopCards = [
-        ...seenCardsRef.current,
-        ...(currentCard ? [currentCard] : []),
-        ...previousCards,
-      ]
-        .filter(Boolean)
-        .filter((card, idx, arr) => arr.findIndex((c) => c.id === card.id) === idx) as VoteCardData[];
-      if (loopCards.length > 0) {
-        seenCardsRef.current = loopCards;
-        setPreviousCards([]);
-        setCurrentCard(loopCards[0] ?? null);
-        setCardQueue(loopCards.slice(1));
-        recentCardIdsRef.current = [];
-        setQueueLoading(false);
-      } else {
-        setCurrentCard(null);
-        setCardQueue([]);
-        setQueueLoading(true);
+      setCardQueue(rest);
+      // 队列剩余不足阈值时后台预拉下一批
+      if (rest.length < REFILL_THRESHOLD) {
+        performRefill(false);
       }
+    } else {
+      // 队列已空，useEffect 会触发 performRefill(true)
+      setCurrentCard(null);
     }
 
     setTimeout(() => {
       setIsTransitioning(false);
     }, 50);
-  }, [currentCard, cardQueue, fetchBatch, translateY, cardOpacity]);
+  }, [currentCard, cardQueue, performRefill, translateY, cardOpacity]);
 
   const resetAndShowPrevious = useCallback(() => {
     setShowResult(false);
@@ -389,8 +403,7 @@ export default function ImageTestScreen() {
     !currentCard &&
     !queueLoading &&
     !isTransitioning &&
-    previousCards.length === 0 &&
-    seenCardsRef.current.length === 0;
+    previousCards.length === 0;
   const showLoading = !currentCard && (queueLoading || isTransitioning);
   const canSwipePrev = canGoBack;
   const canSwipeNext = !!currentCard && !(showResult && showComments);

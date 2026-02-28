@@ -289,16 +289,38 @@ export async function getRandomAvailableCard(userId?: number): Promise<Card | un
   return result[0];
 }
 
-/** Get multiple random cards for voting (for preloading). Excludes voted + optional ids. */
+/** Get multiple random cards for voting (for preloading). Excludes session-queued ids and already-voted cards. */
 export async function getRandomAvailableCards(
   limit: number,
-  _excludeCardIds: number[] = [],
-  _userId?: number
+  excludeCardIds: number[] = [],
+  userId?: number
 ): Promise<Card[]> {
   const db = await getDb();
   if (!db) return [];
 
-  const result = await db.select().from(cards).orderBy(sql`RAND()`).limit(limit);
+  const conditions = [eq(cards.isCompleted, false)];
+
+  if (excludeCardIds.length > 0) {
+    conditions.push(notInArray(cards.id, excludeCardIds));
+  }
+
+  if (userId != null) {
+    const votedRows = await db
+      .select({ cardId: votes.cardId })
+      .from(votes)
+      .where(eq(votes.userId, userId));
+    const votedCardIds = votedRows.map((r) => r.cardId);
+    if (votedCardIds.length > 0) {
+      conditions.push(notInArray(cards.id, votedCardIds));
+    }
+  }
+
+  const result = await db
+    .select()
+    .from(cards)
+    .where(and(...conditions))
+    .orderBy(sql`RAND()`)
+    .limit(limit);
 
   return result;
 }
